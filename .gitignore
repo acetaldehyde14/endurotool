@@ -1,0 +1,18 @@
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Inno Setup output
+Output/
+
+# Temp extraction
+zip2_extracted/
+
+# Zips
+*.zip

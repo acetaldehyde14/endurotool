@@ -1,0 +1,401 @@
+import threading
+import time
+from datetime import datetime, timezone
+
+import irsdk
+import api_client
+from config import POLL_INTERVAL_SECONDS, TELEMETRY_HZ, TELEMETRY_BATCH_SIZE
+
+NEARBY_WINDOW = 2   # positions ahead/behind to include in the nearby cars list
+
+
+class IRacingMonitor:
+    """
+    Two-thread iRacing poller.
+
+    Slow loop  (every POLL_INTERVAL_SECONDS):
+        - driver_change   fired when the driver in the car changes
+        - fuel_update     current fuel level + estimated minutes remaining
+        - position_update overall/class position, lap times, nearby cars + gaps
+        - manages live telemetry session start/end
+
+    Fast loop  (TELEMETRY_HZ times per second, default 15 Hz):
+        - collects telemetry frames, detects lap changes, uploads batches
+          of TELEMETRY_BATCH_SIZE frames directly via api_client
+        - fires telemetry_batch event (count only) to update the GUI
+    """
+
+    def __init__(self, on_event, on_status_change=None):
+        self.ir = irsdk.IRSDK()
+        self.on_event = on_event
+        self.on_status_change = on_status_change
+
+        self._running       = False
+        self._slow_thread   = None
+        self._fast_thread   = None
+        self._connected     = False
+        self._last_driver   = None
+        self._current_lap   = None
+
+        # Telemetry buffer
+        self._telem_buf  = []
+        self._telem_lock = threading.Lock()
+
+        # Live session state
+        self._session_id      = None
+        self._session_active  = False
+        self._sub_session_id  = None   # detect iRacing session changes
+
+    # ── Lifecycle ──────────────────────────────────────────────
+
+    def start(self):
+        self._running     = True
+        self._slow_thread = threading.Thread(target=self._slow_loop, daemon=True)
+        self._fast_thread = threading.Thread(target=self._fast_loop, daemon=True)
+        self._slow_thread.start()
+        self._fast_thread.start()
+
+    def stop(self):
+        self._running = False
+        self._end_session()
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def _set_status(self, msg: str):
+        print(f"[Monitor] {msg}")
+        if self.on_status_change:
+            self.on_status_change(msg)
+
+    # ── Slow loop ──────────────────────────────────────────────
+
+    def _slow_loop(self):
+        self._set_status("Starting — waiting for iRacing...")
+        while self._running:
+            try:
+                if not self.ir.is_initialized:
+                    ok = self.ir.startup()
+                    if not ok:
+                        if self._connected:
+                            self._connected = False
+                            self._end_session()
+                            self._set_status("iRacing not detected. Waiting...")
+                        time.sleep(5)
+                        continue
+
+                if not self.ir.is_connected:
+                    if self._connected:
+                        self._connected = False
+                        self._end_session()
+                        self._set_status("iRacing closed. Waiting...")
+                    time.sleep(5)
+                    continue
+
+                if not self._connected:
+                    self._connected = True
+                    self._set_status("Connected to iRacing ✓")
+
+                self.ir.freeze_var_buffer_latest()
+                self._try_start_session()
+                self._check_driver()
+                self._check_fuel()
+                self._check_position()
+
+            except Exception as e:
+                self._set_status(f"Error: {e}")
+                time.sleep(5)
+                try:
+                    self.ir.shutdown()
+                except Exception:
+                    pass
+
+            time.sleep(POLL_INTERVAL_SECONDS)
+
+    # ── Fast loop ──────────────────────────────────────────────
+
+    def _fast_loop(self):
+        interval = 1.0 / TELEMETRY_HZ
+        while self._running:
+            try:
+                if self._connected and self.ir.is_connected:
+                    self.ir.freeze_var_buffer_latest()
+                    self._collect_sample()
+            except Exception as e:
+                print(f"[Monitor] Fast loop error: {e}")
+            time.sleep(interval)
+
+    def _collect_sample(self):
+        try:
+            speed_raw    = self.ir["Speed"] or 0.0
+            steering_rad = self.ir["SteeringWheelAngle"] or 0.0
+            lap_number   = self.ir["Lap"] or 0
+
+            sample = {
+                "ts":           datetime.now(timezone.utc).isoformat(),
+                "session_time": round(float(self.ir["SessionTime"] or 0.0), 4),
+                "lap_number":   int(lap_number),
+                "lap_dist_pct": round(float(self.ir["LapDistPct"] or 0.0), 4),
+                "speed_kph":    round(float(speed_raw) * 3.6, 3),
+                "throttle":     round(float(self.ir["Throttle"] or 0.0), 4),
+                "brake":        round(float(self.ir["Brake"] or 0.0), 4),
+                "clutch":       round(float(self.ir["Clutch"] or 0.0), 4),
+                "steering_deg": round(float(steering_rad) * 57.2958, 3),
+                "gear":         int(self.ir["Gear"] or 0),
+                "rpm":          int(self.ir["RPM"] or 0),
+                "lat_accel":    round(float(self.ir["LatAccel"] or 0.0), 4),
+                "long_accel":   round(float(self.ir["LongAccel"] or 0.0), 4),
+                "yaw_rate":     round(float(self.ir["YawRate"] or 0.0), 4),
+                "track_temp_c": round(float(self.ir["TrackTempCrew"] or 0.0), 2),
+                "air_temp_c":   round(float(self.ir["AirTemp"] or 0.0), 2),
+            }
+
+            # Detect lap change: flush old lap + notify server
+            if self._current_lap is not None and int(lap_number) != self._current_lap and int(lap_number) > 0:
+                self._on_lap_change(self._current_lap)
+
+            self._current_lap = int(lap_number)
+
+            with self._telem_lock:
+                self._telem_buf.append(sample)
+                if len(self._telem_buf) >= TELEMETRY_BATCH_SIZE:
+                    batch = self._telem_buf[:]
+                    self._telem_buf.clear()
+                    self._upload_batch(batch, self._current_lap)
+
+        except Exception as e:
+            print(f"[Monitor] Sample error: {e}")
+
+    def _on_lap_change(self, completed_lap: int):
+        """Flush batch for the completed lap and send lap-complete."""
+        with self._telem_lock:
+            batch = self._telem_buf[:]
+            self._telem_buf.clear()
+
+        if batch:
+            self._upload_batch(batch, completed_lap)
+
+        if self._session_active and self._session_id:
+            threading.Thread(
+                target=api_client.telemetry_lap_complete,
+                args=(self._session_id, completed_lap),
+                daemon=True,
+            ).start()
+            print(f"[Monitor] Lap completed: {completed_lap}")
+
+    def _upload_batch(self, batch: list, lap: int):
+        """Fire-and-forget upload of a telemetry batch."""
+        if not self._session_active or not self._session_id or not batch:
+            return
+        session_id = self._session_id
+        count = len(batch)
+
+        def _send():
+            api_client.telemetry_batch(session_id, lap or 0, batch, TELEMETRY_HZ)
+
+        threading.Thread(target=_send, daemon=True).start()
+        self.on_event("telemetry_batch", {"count": count})
+
+    # ── Session lifecycle ──────────────────────────────────────
+
+    def _try_start_session(self):
+        """Called from slow loop. Starts a new telemetry session if none active."""
+        if self._session_active:
+            return
+        try:
+            weekend     = self.ir["WeekendInfo"] or {}
+            driver_info = self.ir["DriverInfo"] or {}
+            sub_sid     = weekend.get("SubSessionID")
+
+            # Same sub-session already ended (reconnect) — restart it
+            drivers    = driver_info.get("Drivers", [])
+            player_idx = self.ir["PlayerCarIdx"]
+            driver     = next((d for d in drivers if d.get("CarIdx") == player_idx), {})
+
+            from config import load_config
+            cfg         = load_config()
+            driver_name = driver.get("UserName") or cfg.get("username", "")
+
+            payload = {
+                "sim_session_uid":   str(sub_sid or ""),
+                "sub_session_id":    sub_sid,
+                "track_id":          weekend.get("TrackName", "unknown"),
+                "track_name":        weekend.get("TrackDisplayName", "Unknown Track"),
+                "car_id":            driver.get("CarPath", "unknown"),
+                "car_name":          driver.get("CarScreenName", "Unknown Car"),
+                "session_type":      "practice",
+                "driver_name":       driver_name,
+                "iracing_driver_id": driver.get("UserID"),
+                "started_at":        datetime.now(timezone.utc).isoformat(),
+            }
+
+            def _start():
+                sid = api_client.telemetry_session_start(payload)
+                if sid:
+                    self._session_id     = sid
+                    self._sub_session_id = sub_sid
+                    self._session_active = True
+                    print(f"[Monitor] Telemetry session started: {sid}")
+
+            threading.Thread(target=_start, daemon=True).start()
+
+        except Exception as e:
+            print(f"[Monitor] Session start error: {e}")
+
+    def _end_session(self):
+        """Flush remaining buffer and close the live session."""
+        if not self._session_active or not self._session_id:
+            return
+        session_id = self._session_id
+        self._session_active = False
+        self._session_id     = None
+
+        # Flush any remaining frames
+        with self._telem_lock:
+            batch = self._telem_buf[:]
+            self._telem_buf.clear()
+
+        if batch and self._current_lap is not None:
+            api_client.telemetry_batch(session_id, self._current_lap, batch, TELEMETRY_HZ)
+
+        api_client.telemetry_session_end(session_id)
+        print(f"[Monitor] Telemetry session ended: {session_id}")
+
+    # ── Driver change ──────────────────────────────────────────
+
+    def _check_driver(self):
+        try:
+            player_idx = self.ir["PlayerCarIdx"]
+            if player_idx is None:
+                return
+            drivers = self.ir["DriverInfo"]["Drivers"] or []
+            current = next((d for d in drivers if d.get("CarIdx") == player_idx), None)
+            if not current:
+                return
+            name    = current.get("UserName", "").strip()
+            user_id = str(current.get("UserID", ""))
+            if name and name != self._last_driver:
+                self._last_driver = name
+                self.on_event("driver_change", {
+                    "driver_name":  name,
+                    "driver_id":    user_id,
+                    "session_time": self._f("SessionTime") or 0,
+                })
+        except Exception as e:
+            print(f"[Monitor] Driver check error: {e}")
+
+    # ── Fuel ──────────────────────────────────────────────────
+
+    def _check_fuel(self):
+        try:
+            fuel     = self._f("FuelLevel")
+            fuel_pct = self._f("FuelLevelPct")
+            use_rate = self._f("FuelUsePerHour")
+            if fuel is None:
+                return
+            mins = round((fuel / use_rate) * 60, 1) if use_rate and use_rate > 0.01 else None
+            self.on_event("fuel_update", {
+                "fuel_level":     fuel,
+                "fuel_pct":       fuel_pct or 0,
+                "mins_remaining": mins,
+                "session_time":   self._f("SessionTime") or 0,
+            })
+        except Exception as e:
+            print(f"[Monitor] Fuel check error: {e}")
+
+    # ── Position / standings ───────────────────────────────────
+
+    def _check_position(self):
+        try:
+            player_idx = self.ir["PlayerCarIdx"]
+            if player_idx is None:
+                return
+
+            pos_arr  = self.ir["CarIdxPosition"]
+            cls_arr  = self.ir["CarIdxClassPosition"]
+            f2t_arr  = self.ir["CarIdxF2Time"]
+            lap_arr  = self.ir["CarIdxLap"]
+            last_arr = self.ir["CarIdxLastLapTime"]
+            best_arr = self.ir["CarIdxBestLapTime"]
+            ldp_arr  = self.ir["CarIdxLapDistPct"]
+
+            if not pos_arr:
+                return
+
+            drivers    = self.ir["DriverInfo"]["Drivers"] or []
+            driver_map = {d["CarIdx"]: d for d in drivers}
+
+            my_pos = pos_arr[player_idx]
+            my_gap = f2t_arr[player_idx] if f2t_arr else None
+            my_ldp = ldp_arr[player_idx] if ldp_arr else None
+
+            standings = []
+            for idx, pos in enumerate(pos_arr):
+                if pos <= 0:
+                    continue
+                d       = driver_map.get(idx, {})
+                gap_raw = f2t_arr[idx] if f2t_arr else None
+                standings.append({
+                    "car_idx":       idx,
+                    "position":      pos,
+                    "class_pos":     cls_arr[idx] if cls_arr else None,
+                    "driver_name":   d.get("UserName", f"Car {idx}"),
+                    "car_number":    d.get("CarNumber", "?"),
+                    "car_class":     d.get("CarClassShortName", ""),
+                    "lap":           lap_arr[idx] if lap_arr else None,
+                    "last_lap":      self._fmt_lap(last_arr[idx] if last_arr else None),
+                    "best_lap":      self._fmt_lap(best_arr[idx] if best_arr else None),
+                    "gap_to_leader": self._fmt_gap(gap_raw),
+                    "gap_raw":       gap_raw,
+                    "is_player":     idx == player_idx,
+                })
+
+            standings.sort(key=lambda x: x["position"])
+
+            nearby = []
+            for car in standings:
+                delta = car["position"] - my_pos
+                if abs(delta) <= NEARBY_WINDOW:
+                    gap_to_us = None
+                    if car["gap_raw"] is not None and my_gap is not None:
+                        raw = car["gap_raw"] - my_gap
+                        gap_to_us = f"+{raw:.3f}s" if raw >= 0 else f"{raw:.3f}s"
+                    nearby.append({**car, "delta_position": delta, "gap_to_us": gap_to_us})
+
+            self.on_event("position_update", {
+                "position":       my_pos,
+                "class_position": cls_arr[player_idx] if cls_arr else None,
+                "lap":            lap_arr[player_idx] if lap_arr else None,
+                "last_lap":       self._fmt_lap(last_arr[player_idx] if last_arr else None),
+                "best_lap":       self._fmt_lap(best_arr[player_idx] if best_arr else None),
+                "gap_to_leader":  self._fmt_gap(my_gap),
+                "lap_dist_pct":   round(my_ldp, 4) if my_ldp is not None else None,
+                "nearby":         nearby,
+                "standings":      standings,
+                "session_time":   self._f("SessionTime") or 0,
+            })
+
+        except Exception as e:
+            print(f"[Monitor] Position check error: {e}")
+
+    # ── Helpers ────────────────────────────────────────────────
+
+    def _f(self, key) -> float | None:
+        try:
+            v = self.ir[key]
+            return round(float(v), 4) if v is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fmt_lap(seconds) -> str | None:
+        if not seconds or seconds <= 0:
+            return None
+        m = int(seconds // 60)
+        s = seconds % 60
+        return f"{m}:{s:06.3f}"
+
+    @staticmethod
+    def _fmt_gap(f2time) -> str | None:
+        if f2time is None or f2time < 0:
+            return None
+        return "Leader" if f2time == 0 else f"+{f2time:.3f}s"
