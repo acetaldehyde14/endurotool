@@ -150,7 +150,9 @@ def telemetry_session_start(payload: dict) -> str | None:
             headers=_headers(),
             timeout=15,
         )
-        r.raise_for_status()
+        if not r.ok:
+            print(f"[API] telemetry_session_start HTTP {r.status_code}: {r.text[:300]}")
+            return None
         return r.json().get("session_id")
     except Exception as e:
         print(f"[API] telemetry_session_start failed: {e}")

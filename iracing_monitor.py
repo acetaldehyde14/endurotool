@@ -46,6 +46,7 @@ class IRacingMonitor:
         self._session_active   = False
         self._session_starting = False  # guard against concurrent start attempts
         self._sub_session_id   = None   # detect iRacing session changes
+        self._session_retry_after = 0.0 # timestamp: don't retry before this
 
         # Session-level tracking for summary
         self._laps_completed  = 0
@@ -245,6 +246,8 @@ class IRacingMonitor:
         """Called from slow loop. Starts a new telemetry session if none active."""
         if self._session_active or self._session_starting:
             return
+        if time.time() < self._session_retry_after:
+            return
         try:
             weekend     = self.ir["WeekendInfo"] or {}
             driver_info = self.ir["DriverInfo"] or {}
@@ -288,8 +291,10 @@ class IRacingMonitor:
                         print(f"[Monitor] Telemetry session started: {sid}")
                         self.on_event("telemetry_session_status", {"status": "active", "session_id": sid})
                     else:
-                        print("[Monitor] Session start returned no ID — will retry next cycle")
-                        self.on_event("telemetry_session_status", {"status": "failed"})
+                        # Back off 30 s before retrying — server not ready yet
+                        self._session_retry_after = time.time() + 30
+                        print("[Monitor] Session start failed — retrying in 30 s")
+                        self.on_event("telemetry_session_status", {"status": "waiting"})
                 finally:
                     self._session_starting = False
 

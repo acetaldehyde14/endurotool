@@ -126,7 +126,8 @@ class AppWindow:
     def update_session_status(self, status: str):
         labels = {
             "starting": "Starting session...",
-            "active":   "Session active",
+            "active":   "Session active ✓",
+            "waiting":  "Waiting for active race session",
             "failed":   "Session start failed — retrying",
         }
         text = labels.get(status, status)
