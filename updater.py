@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import messagebox
 from config import SERVER_URL
 
-CURRENT_VERSION = "1.0.5"  # bump this string with every release
+CURRENT_VERSION = "1.0.6"  # bump this string with every release
 
 
 def check_for_updates():

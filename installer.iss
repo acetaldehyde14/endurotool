@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=iRacing Enduro Monitor
-AppVersion=1.0.0
+AppVersion=1.0.6
 AppPublisher=sm corse
 AppPublisherURL=https://smcorse.com
 DefaultDirName={localappdata}\iRacingEnduro
