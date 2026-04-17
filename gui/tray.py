@@ -27,17 +27,26 @@ class AppWindow:
         self.username = username
         self.monitor = monitor
         self.on_logout = on_logout
-        self._status_text = tk.StringVar(value="Starting up...")
-        self._driver_text = tk.StringVar(value="—")
-        self._fuel_text = tk.StringVar(value="—")
-        self._mins_text = tk.StringVar(value="—")
-        self._race_text = tk.StringVar(value="No active race")
-        self._telem_text = tk.StringVar(value="—")
+        # StringVars are created in build() once self.root exists,
+        # so they bind to the correct Tk interpreter.
+        self._status_text = None
+        self._driver_text = None
+        self._fuel_text   = None
+        self._mins_text   = None
+        self._race_text   = None
+        self._telem_text  = None
         self.root = None
         self._window_visible = False
 
     def build(self):
         self.root = tk.Tk()
+        # Create all StringVars bound to this root
+        self._status_text = tk.StringVar(master=self.root, value="Starting up...")
+        self._driver_text = tk.StringVar(master=self.root, value="—")
+        self._fuel_text   = tk.StringVar(master=self.root, value="—")
+        self._mins_text   = tk.StringVar(master=self.root, value="—")
+        self._race_text   = tk.StringVar(master=self.root, value="No active race")
+        self._telem_text  = tk.StringVar(master=self.root, value="Waiting for iRacing...")
         self.root.title("iRacing Enduro Monitor")
         self.root.geometry("400x360")
         self.root.resizable(False, False)
