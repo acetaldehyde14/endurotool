@@ -261,6 +261,19 @@ class IRacingMonitor:
             cfg         = load_config()
             driver_name = driver.get("UserName") or cfg.get("username", "")
 
+            # Detect actual session type from iRacing
+            _SESSION_TYPE_MAP = {
+                "practice":        "practice",
+                "open practice":   "practice",
+                "offline testing": "test",
+                "lone qualify":    "qualify",
+                "open qualify":    "qualify",
+                "race":            "race",
+                "heat race":       "race",
+            }
+            raw_type   = str(self.ir["SessionType"] or "practice").lower().strip()
+            session_type = _SESSION_TYPE_MAP.get(raw_type, "practice")
+
             payload = {
                 "sim_session_uid":   str(sub_sid or ""),
                 "sub_session_id":    sub_sid,
@@ -268,7 +281,7 @@ class IRacingMonitor:
                 "track_name":        weekend.get("TrackDisplayName", "Unknown Track"),
                 "car_id":            driver.get("CarPath", "unknown"),
                 "car_name":          driver.get("CarScreenName", "Unknown Car"),
-                "session_type":      "practice",
+                "session_type":      session_type,
                 "driver_name":       driver_name,
                 "iracing_driver_id": driver.get("UserID"),
                 "started_at":        datetime.now(timezone.utc).isoformat(),
