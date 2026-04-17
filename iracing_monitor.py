@@ -42,9 +42,10 @@ class IRacingMonitor:
         self._telem_lock = threading.Lock()
 
         # Live session state
-        self._session_id      = None
-        self._session_active  = False
-        self._sub_session_id  = None   # detect iRacing session changes
+        self._session_id       = None
+        self._session_active   = False
+        self._session_starting = False  # guard against concurrent start attempts
+        self._sub_session_id   = None   # detect iRacing session changes
 
         # Session-level tracking for summary
         self._laps_completed  = 0
@@ -242,7 +243,7 @@ class IRacingMonitor:
 
     def _try_start_session(self):
         """Called from slow loop. Starts a new telemetry session if none active."""
-        if self._session_active:
+        if self._session_active or self._session_starting:
             return
         try:
             weekend     = self.ir["WeekendInfo"] or {}
@@ -270,22 +271,32 @@ class IRacingMonitor:
                 "started_at":        datetime.now(timezone.utc).isoformat(),
             }
 
+            self._session_starting = True
+            self.on_event("telemetry_session_status", {"status": "starting"})
+
             def _start():
-                sid = api_client.telemetry_session_start(payload)
-                if sid:
-                    self._session_id     = sid
-                    self._sub_session_id = sub_sid
-                    self._session_active = True
-                    # Reset summary counters for the new session
-                    self._laps_completed = 0
-                    self._best_lap_s     = None
-                    self._fuel_per_lap   = []
-                    self._lap_fuel_start = None
-                    print(f"[Monitor] Telemetry session started: {sid}")
+                try:
+                    sid = api_client.telemetry_session_start(payload)
+                    if sid:
+                        self._session_id     = sid
+                        self._sub_session_id = sub_sid
+                        self._session_active = True
+                        self._laps_completed = 0
+                        self._best_lap_s     = None
+                        self._fuel_per_lap   = []
+                        self._lap_fuel_start = None
+                        print(f"[Monitor] Telemetry session started: {sid}")
+                        self.on_event("telemetry_session_status", {"status": "active", "session_id": sid})
+                    else:
+                        print("[Monitor] Session start returned no ID — will retry next cycle")
+                        self.on_event("telemetry_session_status", {"status": "failed"})
+                finally:
+                    self._session_starting = False
 
             threading.Thread(target=_start, daemon=True).start()
 
         except Exception as e:
+            self._session_starting = False
             print(f"[Monitor] Session start error: {e}")
 
     def _end_session(self):
@@ -321,11 +332,12 @@ class IRacingMonitor:
               f"avg fuel {avg_fuel} L/lap")
 
         # Reset tracking state
-        self._laps_completed = 0
-        self._best_lap_s     = None
-        self._fuel_per_lap   = []
-        self._lap_fuel_start = None
-        self._current_lap    = None
+        self._laps_completed   = 0
+        self._best_lap_s       = None
+        self._fuel_per_lap     = []
+        self._lap_fuel_start   = None
+        self._current_lap      = None
+        self._session_starting = False
 
     # ── Driver change ──────────────────────────────────────────
 

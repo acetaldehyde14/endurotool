@@ -112,7 +112,17 @@ class AppWindow:
 
     def update_telemetry(self, count: int):
         if self.root:
-            self.root.after(0, lambda: self._telem_text.set(f"Uploading ({count} samples/batch)"))
+            self.root.after(0, lambda: self._telem_text.set(f"Active — {count} samples/batch"))
+
+    def update_session_status(self, status: str):
+        labels = {
+            "starting": "Starting session...",
+            "active":   "Session active",
+            "failed":   "Session start failed — retrying",
+        }
+        text = labels.get(status, status)
+        if self.root:
+            self.root.after(0, lambda: self._telem_text.set(text))
 
     def _poll_status(self):
         """Fetch server status every 15 seconds to sync race info."""

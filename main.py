@@ -38,6 +38,8 @@ def main():
                 app_window.update_driver(data.get("driver_name", ""))
             elif event_type == "telemetry_batch":
                 app_window.update_telemetry(data.get("count", 0))
+            elif event_type == "telemetry_session_status":
+                app_window.update_session_status(data.get("status", ""))
 
         # Send to server (non-blocking); telemetry is posted directly by the monitor
         if event_type != "telemetry_batch":
