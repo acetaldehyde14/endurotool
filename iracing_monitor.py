@@ -46,6 +46,12 @@ class IRacingMonitor:
         self._session_active  = False
         self._sub_session_id  = None   # detect iRacing session changes
 
+        # Session-level tracking for summary
+        self._laps_completed  = 0
+        self._best_lap_s      = None
+        self._fuel_per_lap    = []     # fuel used each lap (litres)
+        self._lap_fuel_start  = None   # fuel level at start of current lap
+
     # ── Lifecycle ──────────────────────────────────────────────
 
     def start(self):
@@ -128,12 +134,17 @@ class IRacingMonitor:
         try:
             speed_raw    = self.ir["Speed"] or 0.0
             steering_rad = self.ir["SteeringWheelAngle"] or 0.0
-            lap_number   = self.ir["Lap"] or 0
+            lap_number   = int(self.ir["Lap"] or 0)
+
+            # Initialise current lap on first sample
+            if self._current_lap is None:
+                self._current_lap  = lap_number
+                self._lap_fuel_start = self._f("FuelLevel")
 
             sample = {
                 "ts":           datetime.now(timezone.utc).isoformat(),
                 "session_time": round(float(self.ir["SessionTime"] or 0.0), 4),
-                "lap_number":   int(lap_number),
+                "lap_number":   lap_number,
                 "lap_dist_pct": round(float(self.ir["LapDistPct"] or 0.0), 4),
                 "speed_kph":    round(float(speed_raw) * 3.6, 3),
                 "throttle":     round(float(self.ir["Throttle"] or 0.0), 4),
@@ -149,11 +160,10 @@ class IRacingMonitor:
                 "air_temp_c":   round(float(self.ir["AirTemp"] or 0.0), 2),
             }
 
-            # Detect lap change: flush old lap + notify server
-            if self._current_lap is not None and int(lap_number) != self._current_lap and int(lap_number) > 0:
+            # Lap change: flush the completed lap then update tracking
+            if lap_number != self._current_lap and lap_number > 0:
                 self._on_lap_change(self._current_lap)
-
-            self._current_lap = int(lap_number)
+                self._current_lap = lap_number
 
             with self._telem_lock:
                 self._telem_buf.append(sample)
@@ -166,7 +176,32 @@ class IRacingMonitor:
             print(f"[Monitor] Sample error: {e}")
 
     def _on_lap_change(self, completed_lap: int):
-        """Flush batch for the completed lap and send lap-complete."""
+        """Read lap markers, flush the buffer, notify server of lap completion."""
+        # ── Read markers while iRacing data is still for the completed lap ──
+        try:
+            lap_time_s = float(self.ir["LapLastLapTime"] or -1)
+            valid      = lap_time_s > 0
+            incidents  = self.ir["PlayerCarMyIncidentCount"]
+            fuel_now   = self._f("FuelLevel")
+        except Exception:
+            lap_time_s = None
+            valid      = False
+            incidents  = None
+            fuel_now   = None
+
+        # ── Update session summary trackers ───────────────────────────────
+        if valid and lap_time_s is not None:
+            self._laps_completed += 1
+            if self._best_lap_s is None or lap_time_s < self._best_lap_s:
+                self._best_lap_s = lap_time_s
+
+        if self._lap_fuel_start is not None and fuel_now is not None:
+            used = self._lap_fuel_start - fuel_now
+            if used > 0:
+                self._fuel_per_lap.append(round(used, 3))
+        self._lap_fuel_start = fuel_now
+
+        # ── Flush remaining frames for the completed lap ──────────────────
         with self._telem_lock:
             batch = self._telem_buf[:]
             self._telem_buf.clear()
@@ -174,16 +209,24 @@ class IRacingMonitor:
         if batch:
             self._upload_batch(batch, completed_lap)
 
+        # ── Notify server ─────────────────────────────────────────────────
         if self._session_active and self._session_id:
+            session_id = self._session_id
             threading.Thread(
                 target=api_client.telemetry_lap_complete,
-                args=(self._session_id, completed_lap),
+                args=(session_id, completed_lap),
+                kwargs={
+                    "lap_time_s": round(lap_time_s, 3) if valid and lap_time_s else None,
+                    "valid":      valid,
+                    "incidents":  incidents,
+                },
                 daemon=True,
             ).start()
-            print(f"[Monitor] Lap completed: {completed_lap}")
+            print(f"[Monitor] Lap {completed_lap} complete — "
+                  f"{'%.3f s' % lap_time_s if valid and lap_time_s else 'invalid'}")
 
     def _upload_batch(self, batch: list, lap: int):
-        """Fire-and-forget upload of a telemetry batch."""
+        """Fire-and-forget upload of a telemetry batch (with automatic spool on failure)."""
         if not self._session_active or not self._session_id or not batch:
             return
         session_id = self._session_id
@@ -206,7 +249,6 @@ class IRacingMonitor:
             driver_info = self.ir["DriverInfo"] or {}
             sub_sid     = weekend.get("SubSessionID")
 
-            # Same sub-session already ended (reconnect) — restart it
             drivers    = driver_info.get("Drivers", [])
             player_idx = self.ir["PlayerCarIdx"]
             driver     = next((d for d in drivers if d.get("CarIdx") == player_idx), {})
@@ -234,6 +276,11 @@ class IRacingMonitor:
                     self._session_id     = sid
                     self._sub_session_id = sub_sid
                     self._session_active = True
+                    # Reset summary counters for the new session
+                    self._laps_completed = 0
+                    self._best_lap_s     = None
+                    self._fuel_per_lap   = []
+                    self._lap_fuel_start = None
                     print(f"[Monitor] Telemetry session started: {sid}")
 
             threading.Thread(target=_start, daemon=True).start()
@@ -242,7 +289,7 @@ class IRacingMonitor:
             print(f"[Monitor] Session start error: {e}")
 
     def _end_session(self):
-        """Flush remaining buffer and close the live session."""
+        """Flush remaining buffer, send session summary, and close the live session."""
         if not self._session_active or not self._session_id:
             return
         session_id = self._session_id
@@ -257,8 +304,28 @@ class IRacingMonitor:
         if batch and self._current_lap is not None:
             api_client.telemetry_batch(session_id, self._current_lap, batch, TELEMETRY_HZ)
 
-        api_client.telemetry_session_end(session_id)
-        print(f"[Monitor] Telemetry session ended: {session_id}")
+        # Build session summary
+        avg_fuel = (
+            round(sum(self._fuel_per_lap) / len(self._fuel_per_lap), 3)
+            if self._fuel_per_lap else None
+        )
+        summary = {
+            "total_laps":       self._laps_completed,
+            "best_lap_s":       round(self._best_lap_s, 3) if self._best_lap_s else None,
+            "avg_fuel_per_lap": avg_fuel,
+        }
+
+        api_client.telemetry_session_end(session_id, summary)
+        print(f"[Monitor] Session ended — {self._laps_completed} laps, "
+              f"best {'%.3f s' % self._best_lap_s if self._best_lap_s else '—'}, "
+              f"avg fuel {avg_fuel} L/lap")
+
+        # Reset tracking state
+        self._laps_completed = 0
+        self._best_lap_s     = None
+        self._fuel_per_lap   = []
+        self._lap_fuel_start = None
+        self._current_lap    = None
 
     # ── Driver change ──────────────────────────────────────────
 

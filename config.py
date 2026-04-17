@@ -16,6 +16,8 @@ LOW_FUEL_THRESHOLD_MINS = 20  # not used client-side (server handles alerts)
 TELEMETRY_HZ         = 15    # samples per second collected from iRacing
 TELEMETRY_BATCH_SIZE = 20    # frames per batch upload (~1.3 s at 15 Hz)
 
+SPOOL_DIR = os.path.join(CONFIG_DIR, "spool")  # offline batch queue
+
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_PATH):

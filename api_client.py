@@ -1,8 +1,11 @@
+import os
+import json as _json
+import uuid
 import requests
 import threading
 import time
 from datetime import datetime, timezone
-from config import load_config, SERVER_URL
+from config import load_config, SERVER_URL, SPOOL_DIR
 
 _lock = threading.Lock()
 _last_position_post = 0.0
@@ -86,6 +89,50 @@ def post_event(event_type: str, data: dict) -> bool:
         return False
 
 
+# ── Offline spool ──────────────────────────────────────────────
+
+def _spool_write(payload: dict):
+    """Persist a failed batch to disk so it can be replayed later."""
+    try:
+        os.makedirs(SPOOL_DIR, exist_ok=True)
+        path = os.path.join(SPOOL_DIR, f"{uuid.uuid4().hex}.json")
+        with open(path, "w") as f:
+            _json.dump(payload, f)
+        print(f"[API] Spooled batch to {os.path.basename(path)}")
+    except Exception as e:
+        print(f"[API] Spool write failed: {e}")
+
+
+def _spool_replay():
+    """
+    Try to re-upload any spooled batches in order.
+    Called automatically after a successful batch upload.
+    Stops on first failure to avoid hammering a flaky server.
+    """
+    if not os.path.isdir(SPOOL_DIR):
+        return
+    for fname in sorted(os.listdir(SPOOL_DIR)):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(SPOOL_DIR, fname)
+        try:
+            with open(path) as f:
+                payload = _json.load(f)
+            r = requests.post(
+                f"{SERVER_URL}/api/telemetry/live/batch",
+                json=payload,
+                headers=_headers(),
+                timeout=15,
+            )
+            if r.status_code == 200:
+                os.remove(path)
+                print(f"[API] Replayed spooled batch {fname}")
+            else:
+                break   # server error — try again next time
+        except Exception:
+            break       # network error — try again next time
+
+
 # ── Live telemetry session ─────────────────────────────────────
 
 def telemetry_session_start(payload: dict) -> str | None:
@@ -112,35 +159,59 @@ def telemetry_session_start(payload: dict) -> str | None:
 
 def telemetry_batch(session_id: str, lap_number: int,
                     frames: list, sample_rate_hz: int) -> bool:
-    """Upload a batch of telemetry frames for a given lap."""
+    """
+    Upload a batch of telemetry frames for a given lap.
+    On failure the batch is written to the spool directory for later replay.
+    On success any spooled batches are replayed.
+    """
+    payload = {
+        "session_id":     session_id,
+        "lap_number":     lap_number,
+        "sample_rate_hz": sample_rate_hz,
+        "frames":         frames,
+    }
     try:
         r = requests.post(
             f"{SERVER_URL}/api/telemetry/live/batch",
-            json={
-                "session_id":      session_id,
-                "lap_number":      lap_number,
-                "sample_rate_hz":  sample_rate_hz,
-                "frames":          frames,
-            },
+            json=payload,
             headers=_headers(),
             timeout=15,
         )
-        return r.status_code == 200
+        if r.status_code == 200:
+            _spool_replay()   # clear backlog while we have connectivity
+            return True
+        _spool_write(payload)
+        return False
     except Exception as e:
         print(f"[API] telemetry_batch failed: {e}")
+        _spool_write(payload)
         return False
 
 
-def telemetry_lap_complete(session_id: str, lap_number: int) -> bool:
-    """Notify the server that a lap has been completed."""
+def telemetry_lap_complete(session_id: str, lap_number: int,
+                           lap_time_s: float | None = None,
+                           valid: bool = True,
+                           incidents: int | None = None) -> bool:
+    """
+    Notify the server that a lap has been completed.
+
+    lap_time_s  — raw seconds from iRacing (None if unavailable)
+    valid       — False for laps invalidated by iRacing
+    incidents   — cumulative incident count at lap end (server computes delta)
+    """
+    payload = {
+        "session_id":   session_id,
+        "lap_number":   lap_number,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "lap_time_s":   round(lap_time_s, 3) if lap_time_s is not None else None,
+        "valid":        valid,
+    }
+    if incidents is not None:
+        payload["incidents"] = incidents
     try:
         r = requests.post(
             f"{SERVER_URL}/api/telemetry/live/lap-complete",
-            json={
-                "session_id":   session_id,
-                "lap_number":   lap_number,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            },
+            json=payload,
             headers=_headers(),
             timeout=15,
         )
@@ -150,15 +221,25 @@ def telemetry_lap_complete(session_id: str, lap_number: int) -> bool:
         return False
 
 
-def telemetry_session_end(session_id: str) -> bool:
-    """Close a live telemetry session."""
+def telemetry_session_end(session_id: str, summary: dict | None = None) -> bool:
+    """
+    Close a live telemetry session.
+
+    summary (optional) may contain:
+        total_laps, best_lap_s, avg_fuel_per_lap
+    These are merged into the request body so the server can store them
+    without re-reading all raw frames.
+    """
+    payload = {
+        "session_id": session_id,
+        "ended_at":   datetime.now(timezone.utc).isoformat(),
+    }
+    if summary:
+        payload.update(summary)
     try:
         r = requests.post(
             f"{SERVER_URL}/api/telemetry/live/session/end",
-            json={
-                "session_id": session_id,
-                "ended_at":   datetime.now(timezone.utc).isoformat(),
-            },
+            json=payload,
             headers=_headers(),
             timeout=15,
         )
