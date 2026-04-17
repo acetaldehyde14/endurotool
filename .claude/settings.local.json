@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pyinstaller:*)",
+      "Bash(unzip -o \"iracing-enduro-client \\(2\\).zip\" -d ./zip2_extracted)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(echo \"=== DIFF: $f ===\")",
+      "Read(//c/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/**)",
+      "Bash(done)",
+      "Bash(gh repo:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}
