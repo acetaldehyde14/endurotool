@@ -151,9 +151,13 @@ def telemetry_session_start(payload: dict) -> str | None:
             timeout=15,
         )
         if not r.ok:
-            print(f"[API] telemetry_session_start HTTP {r.status_code}: {r.text[:300]}")
+            print(f"[API] telemetry_session_start HTTP {r.status_code}: {r.text[:500]}")
             return None
-        return r.json().get("session_id")
+        data = r.json()
+        sid = data.get("session_id")
+        if not sid:
+            print(f"[API] telemetry_session_start succeeded but no session_id in response: {data}")
+        return sid
     except Exception as e:
         print(f"[API] telemetry_session_start failed: {e}")
         return None
@@ -202,11 +206,10 @@ def telemetry_lap_complete(session_id: str, lap_number: int,
     incidents   — cumulative incident count at lap end (server computes delta)
     """
     payload = {
-        "session_id":   session_id,
-        "lap_number":   lap_number,
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "lap_time_s":   round(lap_time_s, 3) if lap_time_s is not None else None,
-        "valid":        valid,
+        "session_id": session_id,
+        "lap_number": lap_number,
+        "lap_time":   round(lap_time_s, 3) if lap_time_s is not None else None,
+        "is_valid":   valid,
     }
     if incidents is not None:
         payload["incidents"] = incidents
