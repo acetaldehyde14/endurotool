@@ -9,7 +9,15 @@
       "Read(//c/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/**)",
       "Bash(done)",
       "Bash(gh repo:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --noconsole --name iRacingEnduro --icon NONE --collect-all PIL main.py)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --name iRacingEnduro_debug --icon NONE --collect-all PIL main.py)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(gh api *)",
+      "Bash(git -C \"C:\\\\Users\\\\max\\\\Downloads\\\\iracing-enduro-client\\\\iracing-enduro-client\" diff HEAD -- iracing_monitor.py)",
+      "Bash(git -C \"C:\\\\Users\\\\max\\\\Downloads\\\\iracing-enduro-client\\\\iracing-enduro-client\" show HEAD:iracing_monitor.py)",
+      "Bash(git *)"
     ]
   }
 }

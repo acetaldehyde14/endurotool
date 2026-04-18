@@ -1,5 +1,6 @@
 import threading
 import time
+import ctypes
 from datetime import datetime, timezone
 
 import irsdk
@@ -7,6 +8,48 @@ import api_client
 from config import POLL_INTERVAL_SECONDS, TELEMETRY_HZ, TELEMETRY_BATCH_SIZE
 
 NEARBY_WINDOW = 2   # positions ahead/behind to include in the nearby cars list
+
+ENGINE_OFF_BRAKE_THRESHOLD = 0.20
+ENGINE_ON_BRAKE_THRESHOLD  = 0.10
+ENGINE_TOGGLE_COOLDOWN_SECONDS = 0.75
+
+
+# ── Windows keyboard helper (SendInput) ──────────────────────
+# Sends the physical I key. Assumes iRacing has engine toggle bound to I.
+PUL = ctypes.POINTER(ctypes.c_ulong)
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk",         ctypes.c_ushort),
+        ("wScan",       ctypes.c_ushort),
+        ("dwFlags",     ctypes.c_ulong),
+        ("time",        ctypes.c_ulong),
+        ("dwExtraInfo", PUL),
+    ]
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("union", _INPUTUNION)]
+
+INPUT_KEYBOARD  = 1
+KEYEVENTF_KEYUP = 0x0002
+VK_I            = 0x49
+
+def _press_virtual_key(vk_code: int):
+    extra = ctypes.c_ulong(0)
+    key_down = INPUT(
+        type=INPUT_KEYBOARD,
+        union=_INPUTUNION(ki=KEYBDINPUT(vk_code, 0, 0, 0, ctypes.pointer(extra))),
+    )
+    key_up = INPUT(
+        type=INPUT_KEYBOARD,
+        union=_INPUTUNION(ki=KEYBDINPUT(vk_code, 0, KEYEVENTF_KEYUP, 0, ctypes.pointer(extra))),
+    )
+    ctypes.windll.user32.SendInput(1, ctypes.byref(key_down), ctypes.sizeof(INPUT))
+    time.sleep(0.03)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(key_up), ctypes.sizeof(INPUT))
 
 
 class IRacingMonitor:
@@ -54,6 +97,11 @@ class IRacingMonitor:
         self._fuel_per_lap    = []     # fuel used each lap (litres)
         self._lap_fuel_start  = None   # fuel level at start of current lap
 
+        # Auto engine (Licoeo) state
+        self._engine_cut_active    = False
+        self._last_engine_toggle_ts = 0.0
+        self._licoeo_enabled       = True
+
     # ── Lifecycle ──────────────────────────────────────────────
 
     def start(self):
@@ -75,6 +123,39 @@ class IRacingMonitor:
         if self.on_status_change:
             self.on_status_change(msg)
 
+    # ── Auto engine control (Licoeo) ───────────────────────────
+
+    def set_licoeo(self, enabled: bool):
+        self._licoeo_enabled = enabled
+        if not enabled:
+            self._engine_cut_active = False
+
+    def _handle_auto_engine(self, brake_pct: float):
+        if not self._licoeo_enabled:
+            return
+        now = time.time()
+        if now - self._last_engine_toggle_ts < ENGINE_TOGGLE_COOLDOWN_SECONDS:
+            return
+
+        if not self._engine_cut_active and brake_pct >= ENGINE_OFF_BRAKE_THRESHOLD:
+            try:
+                _press_virtual_key(VK_I)
+                self._engine_cut_active = True
+                self._last_engine_toggle_ts = now
+                self._set_status(f"Auto engine OFF (brake {brake_pct * 100:.0f}% >= 20%)")
+            except Exception as e:
+                print(f"[Monitor] Engine OFF toggle failed: {e}")
+            return
+
+        if self._engine_cut_active and brake_pct <= ENGINE_ON_BRAKE_THRESHOLD:
+            try:
+                _press_virtual_key(VK_I)
+                self._engine_cut_active = False
+                self._last_engine_toggle_ts = now
+                self._set_status(f"Auto engine ON (brake {brake_pct * 100:.0f}% <= 10%)")
+            except Exception as e:
+                print(f"[Monitor] Engine ON toggle failed: {e}")
+
     # ── Slow loop ──────────────────────────────────────────────
 
     def _slow_loop(self):
@@ -86,6 +167,7 @@ class IRacingMonitor:
                     if not ok:
                         if self._connected:
                             self._connected = False
+                            self._engine_cut_active = False
                             self._end_session()
                             self._set_status("iRacing not detected. Waiting...")
                         time.sleep(5)
@@ -94,6 +176,7 @@ class IRacingMonitor:
                 if not self.ir.is_connected:
                     if self._connected:
                         self._connected = False
+                        self._engine_cut_active = False
                         self._end_session()
                         self._set_status("iRacing closed. Waiting...")
                     time.sleep(5)
@@ -137,11 +220,15 @@ class IRacingMonitor:
             speed_raw    = self.ir["Speed"] or 0.0
             steering_rad = self.ir["SteeringWheelAngle"] or 0.0
             lap_number   = int(self.ir["Lap"] or 0)
+            brake        = float(self.ir["Brake"] or 0.0)
 
             # Initialise current lap on first sample
             if self._current_lap is None:
-                self._current_lap  = lap_number
+                self._current_lap    = lap_number
                 self._lap_fuel_start = self._f("FuelLevel")
+
+            # Auto engine logic
+            self._handle_auto_engine(brake)
 
             sample = {
                 "ts":           datetime.now(timezone.utc).isoformat(),
@@ -150,7 +237,7 @@ class IRacingMonitor:
                 "lap_dist_pct": round(float(self.ir["LapDistPct"] or 0.0), 4),
                 "speed_kph":    round(float(speed_raw) * 3.6, 3),
                 "throttle":     round(float(self.ir["Throttle"] or 0.0), 4),
-                "brake":        round(float(self.ir["Brake"] or 0.0), 4),
+                "brake":        round(brake, 4),
                 "clutch":       round(float(self.ir["Clutch"] or 0.0), 4),
                 "steering_deg": round(float(steering_rad) * 57.2958, 3),
                 "gear":         int(self.ir["Gear"] or 0),
@@ -271,7 +358,7 @@ class IRacingMonitor:
                 "race":            "race",
                 "heat race":       "race",
             }
-            raw_type   = str(self.ir["SessionType"] or "practice").lower().strip()
+            raw_type     = str(self.ir["SessionType"] or "practice").lower().strip()
             session_type = _SESSION_TYPE_MAP.get(raw_type, "practice")
 
             payload = {
