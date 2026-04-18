@@ -89,13 +89,6 @@ class AppWindow:
             command=self._do_logout,
         ).pack(side="right")
 
-        self._licoeo_btn = tk.Button(
-            btn_frame, text="Licoeo: ON", font=("Segoe UI", 9),
-            bg="#1a6b3a", fg="white", relief="flat", cursor="hand2",
-            command=self._toggle_licoeo,
-        )
-        self._licoeo_btn.pack(side="left")
-
         # Start polling server status
         self._poll_status()
 
@@ -173,14 +166,6 @@ class AppWindow:
             self.root.deiconify()
             self.root.lift()
             self._window_visible = True
-
-    def _toggle_licoeo(self):
-        enabled = not self.monitor._licoeo_enabled
-        self.monitor.set_licoeo(enabled)
-        if enabled:
-            self._licoeo_btn.config(text="Licoeo: ON", bg="#1a6b3a")
-        else:
-            self._licoeo_btn.config(text="Licoeo: OFF", bg="#6b1a1a")
 
     def _do_logout(self):
         if messagebox.askyesno("Logout", "Log out and stop monitoring?"):

@@ -17,7 +17,10 @@
       "Bash(gh api *)",
       "Bash(git -C \"C:\\\\Users\\\\max\\\\Downloads\\\\iracing-enduro-client\\\\iracing-enduro-client\" diff HEAD -- iracing_monitor.py)",
       "Bash(git -C \"C:\\\\Users\\\\max\\\\Downloads\\\\iracing-enduro-client\\\\iracing-enduro-client\" show HEAD:iracing_monitor.py)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(taskkill /f /im iRacingEnduro_debug.exe)",
+      "Bash(taskkill /F /IM iRacingEnduro_debug.exe)",
+      "Bash(xargs grep *)"
     ]
   }
 }

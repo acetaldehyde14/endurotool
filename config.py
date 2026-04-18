@@ -13,8 +13,8 @@ SERVER_URL = "https://smcorse.com"
 POLL_INTERVAL_SECONDS  = 2    # slow loop: driver / fuel / position checks
 LOW_FUEL_THRESHOLD_MINS = 20  # not used client-side (server handles alerts)
 
-TELEMETRY_HZ         = 15    # samples per second collected from iRacing
-TELEMETRY_BATCH_SIZE = 20    # frames per batch upload (~1.3 s at 15 Hz)
+TELEMETRY_HZ         = 30    # samples per second collected from iRacing
+TELEMETRY_BATCH_SIZE = 30    # frames per batch upload (~1 s at 30 Hz)
 
 SPOOL_DIR = os.path.join(CONFIG_DIR, "spool")  # offline batch queue
 
