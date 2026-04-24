@@ -158,6 +158,10 @@ class CoachManager:
         if not profile:
             return
 
+        # Keep _current_lap in sync with the actual iRacing lap counter so
+        # LiveZoneObservations carry the correct lap number for post-lap feedback.
+        self._current_lap = sample.get("lap_number", self._current_lap)
+
         lap_dist  = sample.get("lap_dist_pct", 0.0)
         speed_kph = sample.get("speed_kph", 0.0)
 

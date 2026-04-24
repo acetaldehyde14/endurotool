@@ -347,9 +347,11 @@ def get_voice_manifest() -> dict | None:
 
 
 def download_voice_asset(asset_url: str, local_path: str) -> bool:
-    """Download a voice asset from asset_url and save to local_path."""
+    """Download a voice asset and save to local_path.
+    Handles both absolute URLs and server-relative paths (/api/...)."""
     try:
-        import os
+        if not asset_url.startswith(("http://", "https://")):
+            asset_url = SERVER_URL.rstrip("/") + "/" + asset_url.lstrip("/")
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         r = requests.get(asset_url, headers=_headers(), timeout=30, stream=True)
         if not r.ok:
