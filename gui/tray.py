@@ -38,7 +38,17 @@ class AppWindow:
         self._race_text = None
         self._telem_text = None
         self._coaching_text = None
+        self._position_text = None
+        self._class_pos_text = None
+        self._lap_text = None
+        self._last_lap_text = None
+        self._best_lap_text = None
+        self._gap_text = None
+        self._nearby_text = None
         self._ref_selector = None
+        self._audio_player = None
+        self._on_test_overlay = None
+        self._on_test_voice = None
         self._track_id: str | None = None
         self._car_id: str | None = None
         self.root = None
@@ -53,8 +63,15 @@ class AppWindow:
         self._race_text = tk.StringVar(master=self.root, value="No active race")
         self._telem_text = tk.StringVar(master=self.root, value="Waiting for iRacing...")
         self._coaching_text = tk.StringVar(master=self.root, value="Waiting for session")
+        self._position_text = tk.StringVar(master=self.root, value="-")
+        self._class_pos_text = tk.StringVar(master=self.root, value="-")
+        self._lap_text = tk.StringVar(master=self.root, value="-")
+        self._last_lap_text = tk.StringVar(master=self.root, value="-")
+        self._best_lap_text = tk.StringVar(master=self.root, value="-")
+        self._gap_text = tk.StringVar(master=self.root, value="-")
+        self._nearby_text = tk.StringVar(master=self.root, value="No nearby cars yet")
         self.root.title("iRacing Enduro Monitor")
-        self.root.geometry("520x500")
+        self.root.geometry("560x680")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a2e")
         self.root.protocol("WM_DELETE_WINDOW", self._hide_window)
@@ -76,6 +93,20 @@ class AppWindow:
             bg="#0f3460",
         ).pack()
 
+        top_panel = tk.Frame(self.root, bg="#1a1a2e", padx=16, pady=10)
+        top_panel.pack(fill="x")
+        top_panel.columnconfigure(0, weight=1)
+
+        self._ref_selector = ReferenceLapSelector(
+            top_panel,
+            get_context=lambda: (self._track_id, self._car_id),
+            on_activated=self._on_reference_activated,
+        )
+        self._ref_selector.grid(row=0, column=0, sticky="ew")
+        self._style_ref_selector()
+        self.update_coaching_status("Reference lap selector loaded")
+        print("[UI] Reference lap selector loaded into AppWindow")
+
         body = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=16)
         body.pack(fill="both", expand=True)
 
@@ -85,6 +116,12 @@ class AppWindow:
         self._row(body, "Fuel Remaining", self._mins_text, 3)
         self._row(body, "Telemetry", self._telem_text, 4)
         self._row(body, "Coaching", self._coaching_text, 5)
+        self._row(body, "Position", self._position_text, 6)
+        self._row(body, "Class Pos", self._class_pos_text, 7)
+        self._row(body, "Lap", self._lap_text, 8)
+        self._row(body, "Last Lap", self._last_lap_text, 9)
+        self._row(body, "Best Lap", self._best_lap_text, 10)
+        self._row(body, "Gap", self._gap_text, 11)
 
         tk.Label(
             body,
@@ -92,15 +129,29 @@ class AppWindow:
             font=("Segoe UI", 8),
             fg="#666688",
             bg="#1a1a2e",
-        ).grid(row=6, column=0, columnspan=2, pady=(12, 0), sticky="w")
+        ).grid(row=12, column=0, columnspan=2, pady=(12, 0), sticky="w")
 
-        self._ref_selector = ReferenceLapSelector(
-            self.root,
-            get_context=lambda: (self._track_id, self._car_id),
-            on_activated=self._on_reference_activated,
-        )
-        self._ref_selector.pack(fill="x", padx=16, pady=(0, 4))
-        self._style_ref_selector()
+        nearby_frame = tk.Frame(body, bg="#1a1a2e", pady=8)
+        nearby_frame.grid(row=13, column=0, columnspan=2, sticky="ew")
+        nearby_frame.columnconfigure(0, weight=1)
+        tk.Label(
+            nearby_frame,
+            text="Nearby Cars",
+            font=("Segoe UI", 8, "bold"),
+            fg="#aaaacc",
+            bg="#1a1a2e",
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            nearby_frame,
+            textvariable=self._nearby_text,
+            justify="left",
+            wraplength=470,
+            font=("Segoe UI", 8),
+            fg="#cfd3ea",
+            bg="#1a1a2e",
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
         coach_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=4)
         coach_frame.pack(fill="x")
@@ -140,6 +191,26 @@ class AppWindow:
             relief="flat",
             cursor="hand2",
             command=self._toggle_voice,
+        ).pack(side="left", padx=4)
+        tk.Button(
+            coach_frame,
+            text="Test Overlay",
+            font=("Segoe UI", 8),
+            bg="#333355",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            command=self._run_overlay_test,
+        ).pack(side="left", padx=(12, 4))
+        tk.Button(
+            coach_frame,
+            text="Test Voice",
+            font=("Segoe UI", 8),
+            bg="#333355",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            command=self._run_voice_test,
         ).pack(side="left", padx=4)
 
         btn_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=8)
@@ -212,6 +283,44 @@ class AppWindow:
         if self.root and self._coaching_text:
             self.root.after(0, lambda: self._coaching_text.set(status))
 
+    def update_position(self, data: dict):
+        if not self.root:
+            return
+
+        position = data.get("position")
+        class_position = data.get("class_position")
+        lap = data.get("lap")
+        last_lap = data.get("last_lap") or "-"
+        best_lap = data.get("best_lap") or "-"
+        gap_to_leader = data.get("gap_to_leader") or "-"
+        nearby = data.get("nearby") or []
+
+        nearby_lines = []
+        for car in nearby[:4]:
+            delta = car.get("delta_position")
+            marker = "You" if car.get("is_player") else car.get("driver_name", "Unknown")
+            pos = car.get("position", "?")
+            gap = car.get("gap_to_us") or "-"
+            if car.get("is_player"):
+                nearby_lines.append(f"P{pos}: {marker}")
+            else:
+                relation = f"{delta:+d}" if isinstance(delta, int) else "?"
+                nearby_lines.append(f"P{pos} ({relation}): {marker} [{gap}]")
+        nearby_text = "\n".join(nearby_lines) if nearby_lines else "No nearby cars yet"
+
+        self.root.after(0, lambda: self._position_text.set(f"P{position}" if position else "-"))
+        self.root.after(
+            0,
+            lambda: self._class_pos_text.set(
+                f"P{class_position}" if class_position else "-"
+            ),
+        )
+        self.root.after(0, lambda: self._lap_text.set(str(lap) if lap is not None else "-"))
+        self.root.after(0, lambda: self._last_lap_text.set(last_lap))
+        self.root.after(0, lambda: self._best_lap_text.set(best_lap))
+        self.root.after(0, lambda: self._gap_text.set(gap_to_leader))
+        self.root.after(0, lambda: self._nearby_text.set(nearby_text))
+
     def update_session_context(self, track_id: str, car_id: str):
         self._track_id = track_id
         self._car_id = car_id
@@ -246,6 +355,13 @@ class AppWindow:
     def set_coach_overlay(self, overlay):
         self._coach_overlay = overlay
 
+    def set_audio_player(self, audio_player):
+        self._audio_player = audio_player
+
+    def set_test_actions(self, on_test_overlay=None, on_test_voice=None):
+        self._on_test_overlay = on_test_overlay
+        self._on_test_voice = on_test_voice
+
     def _toggle_coaching(self):
         if not self._coach:
             return
@@ -268,6 +384,23 @@ class AppWindow:
             return
         new_state = not self._coach._voice_enabled
         self._coach.set_voice_enabled(new_state)
+        if self._audio_player:
+            self._audio_player.set_enabled(new_state)
+        self.update_coaching_status(
+            "Voice enabled" if new_state else "Voice disabled"
+        )
+
+    def _run_overlay_test(self):
+        if self._on_test_overlay:
+            self._on_test_overlay()
+        else:
+            self.update_coaching_status("Overlay test unavailable")
+
+    def _run_voice_test(self):
+        if self._on_test_voice:
+            self._on_test_voice()
+        else:
+            self.update_coaching_status("Voice test unavailable")
 
     def _poll_status(self):
         def fetch():

@@ -13,6 +13,7 @@ import tkinter as tk
 import api_client
 from audio_player import AudioPlayer
 from coach_manager import CoachManager
+from coaching_models import CoachingCue
 from config import COACHING_ENABLED
 from gui.login import show_login_if_needed
 from gui.tray import AppWindow
@@ -39,6 +40,8 @@ def main():
                 app_window.update_fuel(data)
             elif event_type == "driver_change":
                 app_window.update_driver(data.get("driver_name", ""))
+            elif event_type == "position_update":
+                app_window.update_position(data)
             elif event_type == "telemetry_batch":
                 app_window.update_telemetry(data.get("count", 0))
             elif event_type == "telemetry_session_status":
@@ -110,12 +113,50 @@ def main():
             def on_coach_status(status: str):
                 on_event("coaching_status", {"status": status})
 
+            def on_test_overlay():
+                cue = CoachingCue(
+                    text="Brake here",
+                    subtitle="Overlay test",
+                    zone_label="Coach",
+                    state="urgent_brake",
+                )
+                if coach_overlay:
+                    try:
+                        coach_overlay.show_cue(cue)
+                        app_window.update_coaching_status("Overlay test sent")
+                        return
+                    except Exception as exc:
+                        print(f"[Main] Coach overlay test error: {exc}")
+                app_window.update_coaching_status("Overlay unavailable")
+
+            def on_test_voice():
+                voice_key = "reference_brake_now_at_the_marker"
+                try:
+                    if audio_player.has_voice_key(voice_key):
+                        was_enabled = coach_manager._voice_enabled if coach_manager else True
+                        if not was_enabled:
+                            audio_player.set_enabled(True)
+                        audio_player.play(voice_key)
+                        if not was_enabled:
+                            audio_player.set_enabled(False)
+                        app_window.update_coaching_status("Voice test requested")
+                    else:
+                        app_window.update_coaching_status(audio_player.manifest_summary())
+                except Exception as exc:
+                    print(f"[Main] Voice test error: {exc}")
+                    app_window.update_coaching_status("Voice test failed")
+
             coach_manager.set_callbacks(
                 on_cue=on_coach_cue,
                 on_status_change=on_coach_status,
             )
 
             app_window.set_coach_overlay(coach_overlay)
+            app_window.set_audio_player(audio_player)
+            app_window.set_test_actions(
+                on_test_overlay=on_test_overlay,
+                on_test_voice=on_test_voice,
+            )
             try:
                 audio_player.load_manifest()
             except Exception as exc:

@@ -30,13 +30,13 @@ from config import (
 )
 
 _SEGMENT_DEFAULTS: dict[str, tuple[str, str, str]] = {
-    "brake_zone": ("Brake here", "urgent_brake", "reference_brake_now_marker"),
+    "brake_zone": ("Brake here", "urgent_brake", "reference_brake_now_at_the_marker"),
     "lift_zone": ("Small lift here", "caution_lift", "reference_small_lift_before_turn_in"),
-    "light_brake": ("Light brake", "caution_lift", "reference_light_brake"),
-    "throttle_pickup": ("Throttle on exit", "throttle_go", "reference_throttle_on_exit"),
-    "wait_rotate": ("Wait on throttle", "caution_lift", "reference_wait_on_throttle"),
+    "light_brake": ("Light brake", "caution_lift", "reference_light_brake_here"),
+    "throttle_pickup": ("Throttle on exit", "throttle_go", "reference_back_to_throttle_on_exit"),
+    "wait_rotate": ("Wait on throttle", "caution_lift", "reference_wait_before_throttle_pickup"),
     "apex": ("Apex", "neutral", "reference_apex_marker"),
-    "exit": ("Power now", "throttle_go", "reference_power_now"),
+    "exit": ("Power now", "throttle_go", "reference_begin_to_feed_in_throttle"),
 }
 _CORRECTION_HISTORY_LAPS = 3
 _MIN_ZONE_SAMPLES = 3

@@ -28,9 +28,7 @@ def _fmt_option(lap: dict) -> str:
 
 
 class ReferenceLapSelector(ttk.LabelFrame):
-    """
-    Drop-in Tkinter frame for selecting the active reference lap.
-    """
+    """Drop-in Tkinter frame for selecting the active reference lap."""
 
     def __init__(
         self,
@@ -67,7 +65,7 @@ class ReferenceLapSelector(ttk.LabelFrame):
     def _build(self):
         self.configure(style="Dark.TLabelframe", padding=(12, 6))
 
-        self._status_var = tk.StringVar(value="-")
+        self._status_var = tk.StringVar(value="Reference lap selector loaded")
         tk.Label(
             self,
             textvariable=self._status_var,
@@ -82,7 +80,7 @@ class ReferenceLapSelector(ttk.LabelFrame):
             self,
             textvariable=self._combo_var,
             state="readonly",
-            width=46,
+            width=52,
             font=("Segoe UI", 9),
         )
         self._combo.grid(row=1, column=0, sticky="ew", padx=(0, 6))
@@ -116,11 +114,13 @@ class ReferenceLapSelector(ttk.LabelFrame):
         ).grid(row=1, column=2)
 
         self.columnconfigure(0, weight=1)
+        print("[RefLapSelector] Reference lap selector loaded")
 
     # Network
     def _reload(self, track_id: str, car_id: str):
         self._set_status("Loading...")
         self._btn_activate.config(state="disabled")
+        print(f"[RefLapSelector] Loading reference laps for {track_id} / {car_id}")
         threading.Thread(
             target=self._fetch_candidates,
             args=(track_id, car_id),
@@ -130,14 +130,18 @@ class ReferenceLapSelector(ttk.LabelFrame):
     def _fetch_candidates(self, track_id: str, car_id: str):
         data = api_client.get_reference_lap_candidates(track_id, car_id)
         if data is None:
+            print(f"[RefLapSelector] No reference lap response for {track_id} / {car_id}")
             self._ui(self._handle_no_data)
             return
+
         laps = data.get("laps", [])
+        print(f"[RefLapSelector] Found {len(laps)} reference lap(s) for {track_id} / {car_id}")
         self._ui(lambda: self._populate(laps, track_id, car_id))
 
     def _populate(self, laps: list, track_id: str, car_id: str):
         self._laps = laps
         if not laps:
+            print(f"[RefLapSelector] No reference laps available for {track_id} / {car_id}")
             self._set_status(f"No reference laps for {track_id} / {car_id}")
             self._combo.set("")
             self._combo["values"] = ()
@@ -155,12 +159,17 @@ class ReferenceLapSelector(ttk.LabelFrame):
         self._selected_id = laps[active_idx].get("lap_id")
 
         active_lap = laps[active_idx]
+        print(
+            "[RefLapSelector] Selected reference lap "
+            f"id={self._selected_id} time={_fmt_time(active_lap.get('lap_time_s'))}"
+        )
         self._set_status(f"{track_id} / {car_id} - {len(laps)} lap(s) available")
         self._btn_activate.config(
             state="normal" if not active_lap.get("is_active_reference") else "disabled"
         )
 
     def _handle_no_data(self):
+        print("[RefLapSelector] Backend unavailable or no laps found")
         self._set_status("Backend unavailable or no laps found")
         self._combo.set("")
         self._combo["values"] = ()
@@ -171,9 +180,14 @@ class ReferenceLapSelector(ttk.LabelFrame):
         idx = self._combo.current()
         if idx < 0 or idx >= len(self._laps):
             return
+
         lap = self._laps[idx]
         self._selected_id = lap.get("lap_id")
         already_active = lap.get("is_active_reference", False)
+        print(
+            "[RefLapSelector] Combobox selected "
+            f"id={self._selected_id} time={_fmt_time(lap.get('lap_time_s'))}"
+        )
         self._btn_activate.config(state="disabled" if already_active else "normal")
 
     def _on_activate(self):

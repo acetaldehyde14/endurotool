@@ -18,6 +18,14 @@ from config import (
     COACHING_VOICE_ENABLED,
 )
 
+_VOICE_KEY_FALLBACKS = {
+    "reference_brake_now_marker": "reference_brake_now_at_the_marker",
+    "reference_light_brake": "reference_light_brake_here",
+    "reference_throttle_on_exit": "reference_back_to_throttle_on_exit",
+    "reference_wait_on_throttle": "reference_wait_before_throttle_pickup",
+    "reference_power_now": "reference_begin_to_feed_in_throttle",
+}
+
 
 class AudioPlayer:
     """
@@ -42,6 +50,18 @@ class AudioPlayer:
         """Fetch the server voice manifest in the background."""
         threading.Thread(target=self._fetch_manifest, daemon=True).start()
 
+    def has_voice_key(self, voice_key: str) -> bool:
+        with self._lock:
+            return self._resolve_asset_locked(voice_key) is not None
+
+    def manifest_summary(self) -> str:
+        with self._lock:
+            if not self._manifest_loaded:
+                return "Voice manifest not loaded yet"
+            if not self._manifest:
+                return "Voice manifest loaded but no assets are available"
+            return f"Voice manifest loaded with {len(self._manifest)} asset(s)"
+
     def play(self, voice_key: str):
         """Play the WAV for voice_key if available and not in cooldown."""
         if not self._enabled or not voice_key:
@@ -52,7 +72,7 @@ class AudioPlayer:
             return
 
         with self._lock:
-            asset = self._manifest.get(voice_key)
+            asset = self._resolve_asset_locked(voice_key)
 
         if asset is None:
             return
@@ -131,6 +151,21 @@ class AudioPlayer:
             print(f"[Audio] Cached: {asset.key}")
         else:
             print(f"[Audio] Download failed: {asset.key}")
+
+    def _resolve_asset_locked(self, voice_key: str) -> VoiceAsset | None:
+        asset = self._manifest.get(voice_key)
+        if asset is not None:
+            return asset
+
+        fallback_key = _VOICE_KEY_FALLBACKS.get(voice_key)
+        if fallback_key:
+            return self._manifest.get(fallback_key)
+
+        for legacy_key, modern_key in _VOICE_KEY_FALLBACKS.items():
+            if modern_key == voice_key:
+                return self._manifest.get(legacy_key)
+
+        return None
 
 
 def _safe_filename(key: str) -> str:
