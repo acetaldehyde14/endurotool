@@ -25,10 +25,11 @@ class IRacingMonitor:
         - fires telemetry_batch event (count only) to update the GUI
     """
 
-    def __init__(self, on_event, on_status_change=None):
+    def __init__(self, on_event, on_status_change=None, coach_manager=None):
         self.ir = irsdk.IRSDK()
         self.on_event = on_event
         self.on_status_change = on_status_change
+        self._coach = coach_manager
 
         self._running       = False
         self._slow_thread   = None
@@ -170,6 +171,13 @@ class IRacingMonitor:
                 self._on_lap_change(self._current_lap)
                 self._current_lap = lap_number
 
+            # Feed sample into coach engine (non-blocking, errors are swallowed)
+            if self._coach:
+                try:
+                    self._coach.on_live_sample(sample)
+                except Exception as e:
+                    print(f"[Monitor] CoachManager.on_live_sample error: {e}")
+
             with self._telem_lock:
                 self._telem_buf.append(sample)
                 if len(self._telem_buf) >= TELEMETRY_BATCH_SIZE:
@@ -213,6 +221,17 @@ class IRacingMonitor:
 
         if batch:
             self._upload_batch(batch, completed_lap)
+
+        # ── Notify coaching engine ────────────────────────────────────────
+        if self._coach:
+            try:
+                self._coach.on_lap_completed(
+                    completed_lap,
+                    lap_time_s=round(lap_time_s, 3) if valid and lap_time_s else None,
+                    valid=valid,
+                )
+            except Exception as e:
+                print(f"[Monitor] CoachManager.on_lap_completed error: {e}")
 
         # ── Notify server ─────────────────────────────────────────────────
         if self._session_active and self._session_id:
@@ -308,6 +327,17 @@ class IRacingMonitor:
                         self._lap_fuel_start = None
                         print(f"[Monitor] Telemetry session started: {sid}")
                         self.on_event("telemetry_session_status", {"status": "active", "session_id": sid})
+                        if self._coach:
+                            try:
+                                self._coach.on_session_started({
+                                    "session_id": sid,
+                                    "track_id":   payload["track_id"],
+                                    "track_name": payload["track_name"],
+                                    "car_id":     payload["car_id"],
+                                    "car_name":   payload["car_name"],
+                                })
+                            except Exception as e:
+                                print(f"[Monitor] CoachManager.on_session_started error: {e}")
                     else:
                         # Back off 30 s before retrying — server not ready yet
                         self._session_retry_after = time.time() + 30
@@ -329,6 +359,12 @@ class IRacingMonitor:
         session_id = self._session_id
         self._session_active = False
         self._session_id     = None
+
+        if self._coach:
+            try:
+                self._coach.on_session_ended()
+            except Exception as e:
+                print(f"[Monitor] CoachManager.on_session_ended error: {e}")
 
         # Flush any remaining frames
         with self._telem_lock:

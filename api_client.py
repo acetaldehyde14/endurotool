@@ -280,3 +280,121 @@ def get_client_version() -> dict | None:
     except Exception:
         pass
     return None
+
+
+# ── Coaching ───────────────────────────────────────────────────────
+
+def get_active_coaching_profile(track_id: str, car_id: str,
+                                 track_name: str | None = None,
+                                 car_name: str | None = None) -> dict | None:
+    """Fetch the active coaching profile for the given track/car combination."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        params = {"track_id": track_id, "car_id": car_id}
+        if track_name:
+            params["track_name"] = track_name
+        if car_name:
+            params["car_name"] = car_name
+        r = requests.get(
+            f"{SERVER_URL}/api/coaching/profile/active",
+            params=params,
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code == 404:
+            return None
+        print(f"[API] get_active_coaching_profile HTTP {r.status_code}")
+        return None
+    except Exception as e:
+        print(f"[API] get_active_coaching_profile failed: {e}")
+        return None
+
+
+def get_coaching_profile_by_session(session_id: str) -> dict | None:
+    """Fetch the coaching profile associated with an active telemetry session."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.get(
+            f"{SERVER_URL}/api/coaching/profile/by-session/{session_id}",
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        if r.status_code == 200:
+            return r.json()
+        return None
+    except Exception as e:
+        print(f"[API] get_coaching_profile_by_session failed: {e}")
+        return None
+
+
+def get_voice_manifest() -> dict | None:
+    """Fetch the voice asset manifest (key -> url mapping)."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.get(
+            f"{SERVER_URL}/api/coaching/voice/manifest",
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        if r.status_code == 200:
+            return r.json()
+        return None
+    except Exception as e:
+        print(f"[API] get_voice_manifest failed: {e}")
+        return None
+
+
+def download_voice_asset(asset_url: str, local_path: str) -> bool:
+    """Download a voice asset from asset_url and save to local_path."""
+    try:
+        import os
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        r = requests.get(asset_url, headers=_headers(), timeout=30, stream=True)
+        if not r.ok:
+            return False
+        with open(local_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=16384):
+                f.write(chunk)
+        return True
+    except Exception as e:
+        print(f"[API] download_voice_asset failed: {e}")
+        return False
+
+
+def post_zone_feedback(session_id: str, lap_number: int,
+                       zone_feedback_payload: list) -> bool:
+    """Post per-zone live performance observations for a completed lap."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.post(
+            f"{SERVER_URL}/api/coaching/feedback/zones",
+            json={
+                "session_id":  session_id,
+                "lap_number":  lap_number,
+                "zones":       zone_feedback_payload,
+            },
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[API] post_zone_feedback failed: {e}")
+        return False
+
+
+def post_coaching_heartbeat(session_id: str, state_payload: dict) -> bool:
+    """Post a lightweight coaching state heartbeat (optional)."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.post(
+            f"{SERVER_URL}/api/coaching/heartbeat",
+            json={"session_id": session_id, **state_payload},
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[API] post_coaching_heartbeat failed: {e}")
+        return False

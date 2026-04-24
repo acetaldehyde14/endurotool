@@ -23,32 +23,36 @@ class AppWindow:
     Lives in the system tray; click tray icon to show/hide.
     """
 
-    def __init__(self, username: str, monitor, on_logout):
-        self.username = username
-        self.monitor = monitor
-        self.on_logout = on_logout
+    def __init__(self, username: str, monitor, on_logout, coach_manager=None):
+        self.username      = username
+        self.monitor       = monitor
+        self.on_logout     = on_logout
+        self._coach        = coach_manager
+        self._coach_overlay = None
         # StringVars are created in build() once self.root exists,
         # so they bind to the correct Tk interpreter.
-        self._status_text = None
-        self._driver_text = None
-        self._fuel_text   = None
-        self._mins_text   = None
-        self._race_text   = None
-        self._telem_text  = None
+        self._status_text   = None
+        self._driver_text   = None
+        self._fuel_text     = None
+        self._mins_text     = None
+        self._race_text     = None
+        self._telem_text    = None
+        self._coaching_text = None
         self.root = None
         self._window_visible = False
 
     def build(self):
         self.root = tk.Tk()
         # Create all StringVars bound to this root
-        self._status_text = tk.StringVar(master=self.root, value="Starting up...")
-        self._driver_text = tk.StringVar(master=self.root, value="—")
-        self._fuel_text   = tk.StringVar(master=self.root, value="—")
-        self._mins_text   = tk.StringVar(master=self.root, value="—")
-        self._race_text   = tk.StringVar(master=self.root, value="No active race")
-        self._telem_text  = tk.StringVar(master=self.root, value="Waiting for iRacing...")
+        self._status_text   = tk.StringVar(master=self.root, value="Starting up...")
+        self._driver_text   = tk.StringVar(master=self.root, value="—")
+        self._fuel_text     = tk.StringVar(master=self.root, value="—")
+        self._mins_text     = tk.StringVar(master=self.root, value="—")
+        self._race_text     = tk.StringVar(master=self.root, value="No active race")
+        self._telem_text    = tk.StringVar(master=self.root, value="Waiting for iRacing...")
+        self._coaching_text = tk.StringVar(master=self.root, value="Waiting for session")
         self.root.title("iRacing Enduro Monitor")
-        self.root.geometry("400x360")
+        self.root.geometry("400x430")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a2e")
         self.root.protocol("WM_DELETE_WINDOW", self._hide_window)
@@ -74,11 +78,38 @@ class AppWindow:
         self._row(body, "Fuel Level",     self._fuel_text,   2)
         self._row(body, "Fuel Remaining", self._mins_text,   3)
         self._row(body, "Telemetry",      self._telem_text,  4)
+        self._row(body, "Coaching",       self._coaching_text, 5)
 
         tk.Label(body, text=f"Logged in as: {self.username}",
                  font=("Segoe UI", 8), fg="#666688", bg="#1a1a2e").grid(
-            row=5, column=0, columnspan=2, pady=(16, 0), sticky="w"
+            row=6, column=0, columnspan=2, pady=(12, 0), sticky="w"
         )
+
+        # Coaching controls
+        coach_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=4)
+        coach_frame.pack(fill="x")
+        tk.Label(
+            coach_frame, text="Coaching:",
+            font=("Segoe UI", 8), fg="#888899", bg="#1a1a2e",
+        ).pack(side="left")
+        tk.Button(
+            coach_frame, text="On/Off",
+            font=("Segoe UI", 8), bg="#333355", fg="white",
+            relief="flat", cursor="hand2",
+            command=self._toggle_coaching,
+        ).pack(side="left", padx=(6, 4))
+        tk.Button(
+            coach_frame, text="Overlay",
+            font=("Segoe UI", 8), bg="#333355", fg="white",
+            relief="flat", cursor="hand2",
+            command=self._toggle_overlay,
+        ).pack(side="left", padx=4)
+        tk.Button(
+            coach_frame, text="Voice",
+            font=("Segoe UI", 8), bg="#333355", fg="white",
+            relief="flat", cursor="hand2",
+            command=self._toggle_voice,
+        ).pack(side="left", padx=4)
 
         # Buttons
         btn_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=8)
@@ -133,6 +164,36 @@ class AppWindow:
         text = labels.get(status, status)
         if self.root:
             self.root.after(0, lambda: self._telem_text.set(text))
+
+    def update_coaching_status(self, status: str):
+        if self.root and self._coaching_text:
+            self.root.after(0, lambda: self._coaching_text.set(status))
+
+    def set_coach_overlay(self, overlay):
+        self._coach_overlay = overlay
+
+    def _toggle_coaching(self):
+        if not self._coach:
+            return
+        new_state = not self._coach._enabled
+        self._coach.set_enabled(new_state)
+        label = "Active" if new_state else "Disabled"
+        if self._coaching_text and self.root:
+            self.root.after(0, lambda: self._coaching_text.set(label))
+
+    def _toggle_overlay(self):
+        if not self._coach:
+            return
+        new_state = not self._coach._overlay_enabled
+        self._coach.set_overlay_enabled(new_state)
+        if self._coach_overlay:
+            self._coach_overlay.set_enabled(new_state)
+
+    def _toggle_voice(self):
+        if not self._coach:
+            return
+        new_state = not self._coach._voice_enabled
+        self._coach.set_voice_enabled(new_state)
 
     def _poll_status(self):
         """Fetch server status every 15 seconds to sync race info."""
