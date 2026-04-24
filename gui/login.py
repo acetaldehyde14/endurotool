@@ -1,8 +1,8 @@
-import tkinter as tk
-from tkinter import messagebox, ttk
 import threading
+import tkinter as tk
+
 import api_client
-from config import save_config, load_config
+from config import load_config, save_config
 
 
 class LoginWindow:
@@ -12,25 +12,23 @@ class LoginWindow:
         self._build_ui()
 
     def _build_ui(self):
-        self.root.title("iRacing Enduro Monitor — Login")
+        self.root.title("iRacing Enduro Monitor - Login")
         self.root.geometry("360x360")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a2e")
 
-        # Center window
         self.root.update_idletasks()
-        w = self.root.winfo_width()
-        h = self.root.winfo_height()
-        x = (self.root.winfo_screenwidth() // 2) - (w // 2)
-        y = (self.root.winfo_screenheight() // 2) - (h // 2)
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f"+{x}+{y}")
 
-        # Header
         header = tk.Frame(self.root, bg="#0f3460", pady=16)
         header.pack(fill="x")
         tk.Label(
             header,
-            text="🏁  iRacing Enduro Monitor",
+            text="iRacing Enduro Monitor",
             font=("Segoe UI", 14, "bold"),
             fg="#e94560",
             bg="#0f3460",
@@ -50,11 +48,16 @@ class LoginWindow:
             bg="#0f3460",
         ).pack()
 
-        # Form
         form = tk.Frame(self.root, bg="#1a1a2e", padx=30, pady=20)
         form.pack(fill="both", expand=True)
 
-        tk.Label(form, text="Username", font=("Segoe UI", 9), fg="#ccccdd", bg="#1a1a2e").pack(anchor="w")
+        tk.Label(
+            form,
+            text="Username",
+            font=("Segoe UI", 9),
+            fg="#ccccdd",
+            bg="#1a1a2e",
+        ).pack(anchor="w")
         self.username_var = tk.StringVar(master=self.root)
         tk.Entry(
             form,
@@ -67,12 +70,18 @@ class LoginWindow:
             bd=5,
         ).pack(fill="x", pady=(2, 12))
 
-        tk.Label(form, text="Password", font=("Segoe UI", 9), fg="#ccccdd", bg="#1a1a2e").pack(anchor="w")
+        tk.Label(
+            form,
+            text="Password",
+            font=("Segoe UI", 9),
+            fg="#ccccdd",
+            bg="#1a1a2e",
+        ).pack(anchor="w")
         self.password_var = tk.StringVar(master=self.root)
         tk.Entry(
             form,
             textvariable=self.password_var,
-            show="•",
+            show="*",
             font=("Segoe UI", 11),
             bg="#16213e",
             fg="white",
@@ -82,7 +91,11 @@ class LoginWindow:
         ).pack(fill="x", pady=(2, 16))
 
         self.status_label = tk.Label(
-            form, text="", font=("Segoe UI", 9), fg="#e94560", bg="#1a1a2e"
+            form,
+            text="",
+            font=("Segoe UI", 9),
+            fg="#e94560",
+            bg="#1a1a2e",
         )
         self.status_label.pack()
 
@@ -114,8 +127,7 @@ class LoginWindow:
         )
         signup_btn.pack(fill="x")
 
-        # Enter key triggers login
-        self.root.bind("<Return>", lambda e: self._on_login())
+        self.root.bind("<Return>", lambda _event: self._on_login())
 
     def _on_login(self):
         username = self.username_var.get().strip()
@@ -133,13 +145,19 @@ class LoginWindow:
                 result = api_client.login(username, password)
                 token = result["token"]
                 user = result["user"]
-                save_config({"token": token, "username": user["username"], "user_id": user["id"]})
+                save_config(
+                    {
+                        "token": token,
+                        "username": user["username"],
+                        "user_id": user["id"],
+                    }
+                )
                 self.root.after(0, lambda: self._login_success(user["username"]))
             except Exception as e:
-                msg = "Invalid username or password"
+                message = "Invalid username or password"
                 if "connect" in str(e).lower() or "timeout" in str(e).lower():
-                    msg = "Cannot reach server — check your connection"
-                self.root.after(0, lambda: self._login_failed(msg))
+                    message = "Cannot reach server - check your connection"
+                self.root.after(0, lambda: self._login_failed(message))
 
         threading.Thread(target=do_login, daemon=True).start()
 
@@ -165,26 +183,24 @@ class SignUpWindow:
         self._build_ui()
 
     def _build_ui(self):
-        self.win.title("iRacing Enduro Monitor — Create Account")
+        self.win.title("iRacing Enduro Monitor - Create Account")
         self.win.geometry("360x320")
         self.win.resizable(False, False)
         self.win.configure(bg="#1a1a2e")
         self.win.grab_set()
 
-        # Center window
         self.win.update_idletasks()
-        w = self.win.winfo_width()
-        h = self.win.winfo_height()
-        x = (self.win.winfo_screenwidth() // 2) - (w // 2)
-        y = (self.win.winfo_screenheight() // 2) - (h // 2)
+        width = self.win.winfo_width()
+        height = self.win.winfo_height()
+        x = (self.win.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.win.winfo_screenheight() // 2) - (height // 2)
         self.win.geometry(f"+{x}+{y}")
 
-        # Header
         header = tk.Frame(self.win, bg="#0f3460", pady=16)
         header.pack(fill="x")
         tk.Label(
             header,
-            text="🏁  iRacing Enduro Monitor",
+            text="iRacing Enduro Monitor",
             font=("Segoe UI", 14, "bold"),
             fg="#e94560",
             bg="#0f3460",
@@ -197,53 +213,41 @@ class SignUpWindow:
             bg="#0f3460",
         ).pack()
 
-        # Form
         form = tk.Frame(self.win, bg="#1a1a2e", padx=30, pady=20)
         form.pack(fill="both", expand=True)
 
-        tk.Label(form, text="Username", font=("Segoe UI", 9), fg="#ccccdd", bg="#1a1a2e").pack(anchor="w")
-        self.username_var = tk.StringVar(master=self.win)
-        tk.Entry(
-            form,
-            textvariable=self.username_var,
-            font=("Segoe UI", 11),
-            bg="#16213e",
-            fg="white",
-            insertbackground="white",
-            relief="flat",
-            bd=5,
-        ).pack(fill="x", pady=(2, 10))
-
-        tk.Label(form, text="Password", font=("Segoe UI", 9), fg="#ccccdd", bg="#1a1a2e").pack(anchor="w")
-        self.password_var = tk.StringVar(master=self.win)
-        tk.Entry(
-            form,
-            textvariable=self.password_var,
-            show="•",
-            font=("Segoe UI", 11),
-            bg="#16213e",
-            fg="white",
-            insertbackground="white",
-            relief="flat",
-            bd=5,
-        ).pack(fill="x", pady=(2, 10))
-
-        tk.Label(form, text="Confirm Password", font=("Segoe UI", 9), fg="#ccccdd", bg="#1a1a2e").pack(anchor="w")
-        self.confirm_var = tk.StringVar(master=self.win)
-        tk.Entry(
-            form,
-            textvariable=self.confirm_var,
-            show="•",
-            font=("Segoe UI", 11),
-            bg="#16213e",
-            fg="white",
-            insertbackground="white",
-            relief="flat",
-            bd=5,
-        ).pack(fill="x", pady=(2, 10))
+        for label_text, attr_name in (
+            ("Username", "username_var"),
+            ("Password", "password_var"),
+            ("Confirm Password", "confirm_var"),
+        ):
+            tk.Label(
+                form,
+                text=label_text,
+                font=("Segoe UI", 9),
+                fg="#ccccdd",
+                bg="#1a1a2e",
+            ).pack(anchor="w")
+            var = tk.StringVar(master=self.win)
+            setattr(self, attr_name, var)
+            tk.Entry(
+                form,
+                textvariable=var,
+                show="*" if "Password" in label_text else "",
+                font=("Segoe UI", 11),
+                bg="#16213e",
+                fg="white",
+                insertbackground="white",
+                relief="flat",
+                bd=5,
+            ).pack(fill="x", pady=(2, 10))
 
         self.status_label = tk.Label(
-            form, text="", font=("Segoe UI", 9), fg="#e94560", bg="#1a1a2e"
+            form,
+            text="",
+            font=("Segoe UI", 9),
+            fg="#e94560",
+            bg="#1a1a2e",
         )
         self.status_label.pack()
 
@@ -261,7 +265,7 @@ class SignUpWindow:
         )
         self.signup_btn.pack(fill="x", pady=(4, 0))
 
-        self.win.bind("<Return>", lambda e: self._on_signup())
+        self.win.bind("<Return>", lambda _event: self._on_signup())
 
     def _on_signup(self):
         username = self.username_var.get().strip()
@@ -283,15 +287,21 @@ class SignUpWindow:
                 result = api_client.register(username, password)
                 token = result["token"]
                 user = result["user"]
-                save_config({"token": token, "username": user["username"], "user_id": user["id"]})
+                save_config(
+                    {
+                        "token": token,
+                        "username": user["username"],
+                        "user_id": user["id"],
+                    }
+                )
                 self.win.after(0, lambda: self._signup_success(user["username"]))
             except Exception as e:
-                msg = "Registration failed"
+                message = "Registration failed"
                 if "connect" in str(e).lower() or "timeout" in str(e).lower():
-                    msg = "Cannot reach server — check your connection"
+                    message = "Cannot reach server - check your connection"
                 elif "409" in str(e) or "exists" in str(e).lower():
-                    msg = "Username already taken"
-                self.win.after(0, lambda: self._signup_failed(msg))
+                    message = "Username already taken"
+                self.win.after(0, lambda: self._signup_failed(message))
 
         threading.Thread(target=do_register, daemon=True).start()
 
@@ -307,7 +317,7 @@ class SignUpWindow:
 
 
 def show_login_if_needed(on_ready, root=None):
-    """Check stored token; show login window only if needed."""
+    """Check the stored token and show the login window only if needed."""
     cfg = load_config()
     token = cfg.get("token")
 
@@ -327,5 +337,5 @@ def show_login_if_needed(on_ready, root=None):
 
 
 def _show_login(on_ready):
-    win = LoginWindow(on_ready)
-    win.run()
+    window = LoginWindow(on_ready)
+    window.run()

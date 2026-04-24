@@ -1,11 +1,8 @@
 """
-CoachOverlay — borderless always-on-top Tkinter coaching banner.
+CoachOverlay - borderless always-on-top Tkinter coaching banner.
 
-Designed for use with iRacing running in windowed or borderless-windowed mode.
-(True fullscreen exclusive DirectX mode cannot be overlaid by Python windows.)
-
-All public methods are thread-safe: they schedule work on the Tk main thread
-via root.after().
+Designed for use with iRacing in windowed or borderless-windowed mode.
+All public methods are thread-safe and schedule work on the Tk main thread.
 """
 
 import tkinter as tk
@@ -13,19 +10,19 @@ from typing import Optional
 
 from coaching_models import CoachingCue
 
-# Visual state → (background accent colour, text colour)
+# Visual state -> (background accent color, text color)
 _STATE_COLOURS = {
     "urgent_brake": ("#c0392b", "#ffffff"),
     "caution_lift": ("#e67e22", "#ffffff"),
-    "throttle_go":  ("#27ae60", "#ffffff"),
-    "neutral":      ("#1a1a2e", "#ffffff"),
+    "throttle_go": ("#27ae60", "#ffffff"),
+    "neutral": ("#1a1a2e", "#ffffff"),
 }
 
-_DEFAULT_DISPLAY_MS  = 3000   # how long a cue stays visible
-_OVERLAY_ALPHA       = 0.88
-_OVERLAY_WIDTH       = 460
-_OVERLAY_HEIGHT      = 90
-_OVERLAY_Y_OFFSET    = 60     # pixels from top of primary screen
+_DEFAULT_DISPLAY_MS = 3000
+_OVERLAY_ALPHA = 0.88
+_OVERLAY_WIDTH = 460
+_OVERLAY_HEIGHT = 90
+_OVERLAY_Y_OFFSET = 60
 
 
 class CoachOverlay:
@@ -37,15 +34,14 @@ class CoachOverlay:
     """
 
     def __init__(self, root: tk.Tk):
-        self._root       = root
+        self._root = root
         self._window: Optional[tk.Toplevel] = None
-        self._hide_job   = None
-        self._text_var:  Optional[tk.StringVar] = None
-        self._sub_var:   Optional[tk.StringVar] = None
+        self._hide_job = None
+        self._text_var: Optional[tk.StringVar] = None
+        self._sub_var: Optional[tk.StringVar] = None
         self._label_var: Optional[tk.StringVar] = None
-        self._enabled    = True
+        self._enabled = True
 
-        # Build the window now (on main thread) but keep it hidden.
         self._build_window()
 
     def set_enabled(self, enabled: bool):
@@ -53,35 +49,32 @@ class CoachOverlay:
         if not enabled and self._window:
             self._root.after(0, self._hide)
 
-    # ── Public thread-safe API ─────────────────────────────────────
-
+    # Public thread-safe API
     def show_cue(self, cue: CoachingCue, duration_ms: int = _DEFAULT_DISPLAY_MS):
         """Show a coaching cue. Safe to call from any thread."""
         self._root.after(0, lambda: self._show(cue, duration_ms))
 
     def hide(self):
-        """Immediately hide the overlay. Safe to call from any thread."""
+        """Hide the overlay immediately. Safe to call from any thread."""
         self._root.after(0, self._hide)
 
-    # ── Internal (must run on main thread) ────────────────────────
-
+    # Internal; must run on the main thread
     def _build_window(self):
         try:
             self._window = tk.Toplevel(self._root)
-            self._window.overrideredirect(True)          # no title bar / border
+            self._window.overrideredirect(True)
             self._window.attributes("-topmost", True)
             self._window.attributes("-alpha", _OVERLAY_ALPHA)
             self._window.configure(bg="#1a1a2e")
 
-            sw = self._root.winfo_screenwidth()
-            x  = (sw - _OVERLAY_WIDTH) // 2
+            screen_width = self._root.winfo_screenwidth()
+            x = (screen_width - _OVERLAY_WIDTH) // 2
             self._window.geometry(
                 f"{_OVERLAY_WIDTH}x{_OVERLAY_HEIGHT}+{x}+{_OVERLAY_Y_OFFSET}"
             )
 
-            # Variables
-            self._text_var  = tk.StringVar()
-            self._sub_var   = tk.StringVar()
+            self._text_var = tk.StringVar()
+            self._sub_var = tk.StringVar()
             self._label_var = tk.StringVar()
 
             inner = tk.Frame(self._window, bg="#1a1a2e", padx=16, pady=8)
@@ -120,9 +113,7 @@ class CoachOverlay:
             )
             self._zone_label.pack(side="right")
 
-            # Start hidden
             self._window.withdraw()
-
         except Exception as e:
             print(f"[Overlay] Window build failed: {e}")
             self._window = None
@@ -130,6 +121,7 @@ class CoachOverlay:
     def _show(self, cue: CoachingCue, duration_ms: int):
         if not self._enabled or not self._window:
             return
+
         try:
             self._text_var.set(cue.text)
             self._sub_var.set(cue.subtitle)
@@ -160,7 +152,6 @@ class CoachOverlay:
                 widget.configure(bg=bg, fg=fg)
             for widget in (self._sub_label, self._zone_label):
                 widget.configure(bg=bg)
-            # Update inner frame too
             for child in self._window.winfo_children():
                 _set_bg_recursive(child, bg)
         except Exception:
