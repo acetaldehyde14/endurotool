@@ -127,8 +127,12 @@ imports:
  &#8226;   <a href="#_weakrefset">_weakrefset</a>
  &#8226;   <a href="#abc">abc</a>
  &#8226;   <a href="#api_client">api_client</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
+ &#8226;   <a href="#coach_overlay">coach_overlay</a>
  &#8226;   <a href="#codecs">codecs</a>
  &#8226;   <a href="#collections">collections</a>
+ &#8226;   <a href="#config">config</a>
  &#8226;   <a href="#copyreg">copyreg</a>
  &#8226;   <a href="#encodings">encodings</a>
  &#8226;   <a href="#encodings.aliases">encodings.aliases</a>
@@ -4735,7 +4739,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#gui.login">gui.login</a>
+    <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
+ &#8226;   <a href="#gui.login">gui.login</a>
  &#8226;   <a href="#gui.tray">gui.tray</a>
  &#8226;   <a href="#iracing_monitor">iracing_monitor</a>
  &#8226;   <a href="#main.py">main.py</a>
@@ -4825,6 +4831,29 @@ imported by:
  &#8226;   <a href="#pystray._util.gtk">pystray._util.gtk</a>
  &#8226;   <a href="#pystray._util.notify_dbus">pystray._util.notify_dbus</a>
  &#8226;   <a href="#weakref">weakref</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="audio_player"></a>
+  <a target="code" href="///C:/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/audio_player.py" type="text/plain"><tt>audio_player</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#api_client">api_client</a>
+ &#8226;   <a href="#coaching_models">coaching_models</a>
+ &#8226;   <a href="#config">config</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#time">time</a>
+ &#8226;   <a href="#typing">typing</a>
+ &#8226;   <a href="#winsound">winsound</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
 
   </div>
 
@@ -5282,6 +5311,64 @@ imported by:
 </div>
 
 <div class="node">
+  <a name="coach_manager"></a>
+  <a target="code" href="///C:/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/coach_manager.py" type="text/plain"><tt>coach_manager</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#api_client">api_client</a>
+ &#8226;   <a href="#coaching_models">coaching_models</a>
+ &#8226;   <a href="#config">config</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#time">time</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="coach_overlay"></a>
+  <a target="code" href="///C:/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/coach_overlay.py" type="text/plain"><tt>coach_overlay</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#coaching_models">coaching_models</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="coaching_models"></a>
+  <a target="code" href="///C:/Users/max/Downloads/iracing-enduro-client/iracing-enduro-client/coaching_models.py" type="text/plain"><tt>coaching_models</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
+ &#8226;   <a href="#coach_overlay">coach_overlay</a>
+
+  </div>
+
+</div>
+
+<div class="node">
   <a name="codecs"></a>
   <a target="code" href="///C:/Users/max/AppData/Local/Programs/Python/Python313/Lib/codecs.py" type="text/plain"><tt>codecs</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -5526,9 +5613,12 @@ imports:
   <div class="import">
 imported by:
     <a href="#api_client">api_client</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
  &#8226;   <a href="#gui.login">gui.login</a>
  &#8226;   <a href="#gui.tray">gui.tray</a>
  &#8226;   <a href="#iracing_monitor">iracing_monitor</a>
+ &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#updater">updater</a>
 
   </div>
@@ -7216,7 +7306,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#cryptography.hazmat.primitives.serialization.ssh">cryptography.hazmat.primitives.serialization.ssh</a>
+    <a href="#coaching_models">coaching_models</a>
+ &#8226;   <a href="#cryptography.hazmat.primitives.serialization.ssh">cryptography.hazmat.primitives.serialization.ssh</a>
  &#8226;   <a href="#pprint">pprint</a>
  &#8226;   <a href="#urllib3.contrib.emscripten.request">urllib3.contrib.emscripten.request</a>
  &#8226;   <a href="#urllib3.contrib.emscripten.response">urllib3.contrib.emscripten.response</a>
@@ -12404,6 +12495,7 @@ imported by:
  &#8226;   <a href="#_strptime">_strptime</a>
  &#8226;   <a href="#api_client">api_client</a>
  &#8226;   <a href="#argparse">argparse</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
  &#8226;   <a href="#bz2">bz2</a>
  &#8226;   <a href="#charset_normalizer.api">charset_normalizer.api</a>
  &#8226;   <a href="#config">config</a>
@@ -14671,6 +14763,8 @@ imports:
 imported by:
     <a href="#_threading_local">_threading_local</a>
  &#8226;   <a href="#api_client">api_client</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
  &#8226;   <a href="#cryptography.hazmat.bindings.openssl.binding">cryptography.hazmat.bindings.openssl.binding</a>
  &#8226;   <a href="#gui.login">gui.login</a>
  &#8226;   <a href="#gui.tray">gui.tray</a>
@@ -14714,6 +14808,8 @@ imported by:
  &#8226;   <a href="#_pydatetime">_pydatetime</a>
  &#8226;   <a href="#_strptime">_strptime</a>
  &#8226;   <a href="#api_client">api_client</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
  &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#email._parseaddr">email._parseaddr</a>
  &#8226;   <a href="#email.generator">email.generator</a>
@@ -14764,7 +14860,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#gui.login">gui.login</a>
+    <a href="#coach_overlay">coach_overlay</a>
+ &#8226;   <a href="#gui.login">gui.login</a>
  &#8226;   <a href="#gui.tray">gui.tray</a>
  &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#tkinter.commondialog">tkinter.commondialog</a>
@@ -15087,10 +15184,14 @@ imported by:
  &#8226;   <a href="#PIL._util">PIL._util</a>
  &#8226;   <a href="#PIL.features">PIL.features</a>
  &#8226;   <a href="#_colorize">_colorize</a>
+ &#8226;   <a href="#audio_player">audio_player</a>
  &#8226;   <a href="#charset_normalizer.api">charset_normalizer.api</a>
  &#8226;   <a href="#charset_normalizer.legacy">charset_normalizer.legacy</a>
  &#8226;   <a href="#charset_normalizer.models">charset_normalizer.models</a>
  &#8226;   <a href="#charset_normalizer.utils">charset_normalizer.utils</a>
+ &#8226;   <a href="#coach_manager">coach_manager</a>
+ &#8226;   <a href="#coach_overlay">coach_overlay</a>
+ &#8226;   <a href="#coaching_models">coaching_models</a>
  &#8226;   <a href="#cryptography.exceptions">cryptography.exceptions</a>
  &#8226;   <a href="#cryptography.hazmat.backends">cryptography.hazmat.backends</a>
  &#8226;   <a href="#cryptography.hazmat.bindings.openssl.binding">cryptography.hazmat.bindings.openssl.binding</a>
@@ -16614,6 +16715,16 @@ imported by:
  &#8226;   <a href="#platform">platform</a>
  &#8226;   <a href="#requests.utils">requests.utils</a>
  &#8226;   <a href="#urllib.request">urllib.request</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="winsound"></a>
+  <tt>winsound</tt> <span class="moduletype"><tt>C:\Users\max\AppData\Local\Programs\Python\Python313\DLLs\winsound.pyd</tt></span>  <div class="import">
+imported by:
+    <a href="#audio_player">audio_player</a>
 
   </div>
 

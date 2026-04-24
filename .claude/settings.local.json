@@ -20,7 +20,8 @@
       "Bash(git *)",
       "Bash(taskkill /f /im iRacingEnduro_debug.exe)",
       "Bash(taskkill /F /IM iRacingEnduro_debug.exe)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(python -m py_compile config.py api_client.py coaching_models.py coach_manager.py coach_overlay.py audio_player.py iracing_monitor.py main.py)"
     ]
   }
 }
