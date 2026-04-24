@@ -326,7 +326,12 @@ class IRacingMonitor:
                         self._fuel_per_lap   = []
                         self._lap_fuel_start = None
                         print(f"[Monitor] Telemetry session started: {sid}")
-                        self.on_event("telemetry_session_status", {"status": "active", "session_id": sid})
+                        self.on_event("telemetry_session_status", {
+                            "status":     "active",
+                            "session_id": sid,
+                            "track_id":   payload["track_id"],
+                            "car_id":     payload["car_id"],
+                        })
                         if self._coach:
                             try:
                                 self._coach.on_session_started({

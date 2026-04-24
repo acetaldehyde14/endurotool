@@ -45,6 +45,11 @@ def main():
                 app_window.update_telemetry(data.get("count", 0))
             elif event_type == "telemetry_session_status":
                 app_window.update_session_status(data.get("status", ""))
+                if data.get("status") == "active":
+                    track_id = data.get("track_id", "")
+                    car_id   = data.get("car_id", "")
+                    if track_id and car_id:
+                        app_window.update_session_context(track_id, car_id)
             elif event_type == "coaching_status":
                 app_window.update_coaching_status(data.get("status", ""))
 

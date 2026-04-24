@@ -386,6 +386,44 @@ def post_zone_feedback(session_id: str, lap_number: int,
         return False
 
 
+def get_reference_lap_candidates(track_id: str, car_id: str,
+                                  limit: int = 20) -> dict | None:
+    """Return up to `limit` candidate reference laps for the given track/car."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.get(
+            f"{SERVER_URL}/api/coaching/reference/candidates",
+            params={"track_id": track_id, "car_id": car_id, "limit": limit},
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code == 404:
+            return None
+        print(f"[API] get_reference_lap_candidates HTTP {r.status_code}")
+        return None
+    except Exception as e:
+        print(f"[API] get_reference_lap_candidates failed: {e}")
+        return None
+
+
+def activate_reference_lap(lap_id: int) -> bool:
+    """Set a lap as the active coaching reference for its track/car."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+    try:
+        r = requests.post(
+            f"{SERVER_URL}/api/coaching/reference/{lap_id}/activate",
+            json={},
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        return r.status_code == 200
+    except Exception as e:
+        print(f"[API] activate_reference_lap({lap_id}) failed: {e}")
+        return False
+
+
 def post_coaching_heartbeat(session_id: str, state_payload: dict) -> bool:
     """Post a lightweight coaching state heartbeat (optional)."""
     from config import COACHING_API_TIMEOUT_SECONDS

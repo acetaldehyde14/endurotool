@@ -6,6 +6,7 @@ import pystray
 from PIL import Image, ImageDraw
 import api_client
 from config import clear_config, load_config
+from gui.reference_lap_selector import ReferenceLapSelector
 
 
 def _make_tray_icon():
@@ -38,6 +39,9 @@ class AppWindow:
         self._race_text     = None
         self._telem_text    = None
         self._coaching_text = None
+        self._ref_selector  = None   # ReferenceLapSelector widget
+        self._track_id: str | None = None
+        self._car_id:   str | None = None
         self.root = None
         self._window_visible = False
 
@@ -52,7 +56,7 @@ class AppWindow:
         self._telem_text    = tk.StringVar(master=self.root, value="Waiting for iRacing...")
         self._coaching_text = tk.StringVar(master=self.root, value="Waiting for session")
         self.root.title("iRacing Enduro Monitor")
-        self.root.geometry("400x430")
+        self.root.geometry("520x500")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a2e")
         self.root.protocol("WM_DELETE_WINDOW", self._hide_window)
@@ -84,6 +88,15 @@ class AppWindow:
                  font=("Segoe UI", 8), fg="#666688", bg="#1a1a2e").grid(
             row=6, column=0, columnspan=2, pady=(12, 0), sticky="w"
         )
+
+        # Reference lap selector
+        self._ref_selector = ReferenceLapSelector(
+            self.root,
+            get_context=lambda: (self._track_id, self._car_id),
+            on_activated=self._on_reference_activated,
+        )
+        self._ref_selector.pack(fill="x", padx=16, pady=(0, 4))
+        self._style_ref_selector()
 
         # Coaching controls
         coach_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=4)
@@ -168,6 +181,41 @@ class AppWindow:
     def update_coaching_status(self, status: str):
         if self.root and self._coaching_text:
             self.root.after(0, lambda: self._coaching_text.set(status))
+
+    def update_session_context(self, track_id: str, car_id: str):
+        """Called when a new iRacing session starts so the selector can refresh."""
+        self._track_id = track_id
+        self._car_id   = car_id
+        if self.root and self._ref_selector:
+            self.root.after(0, lambda: self._ref_selector.set_context(track_id, car_id))
+
+    def _style_ref_selector(self):
+        """Apply dark theme colours to the LabelFrame and its children."""
+        if not self._ref_selector:
+            return
+        try:
+            style = ttk.Style(self.root)
+            style.configure(
+                "Dark.TLabelframe",
+                background="#1a1a2e",
+                bordercolor="#252a35",
+                relief="solid",
+            )
+            style.configure(
+                "Dark.TLabelframe.Label",
+                background="#1a1a2e",
+                foreground="#aaaacc",
+                font=("Segoe UI", 8, "bold"),
+            )
+            self._ref_selector.configure(style="Dark.TLabelframe")
+        except Exception:
+            pass
+
+    def _on_reference_activated(self):
+        """Called by the selector after a successful lap activation."""
+        if self._coach:
+            # Tell the coaching engine to re-fetch its profile
+            threading.Thread(target=self._coach._fetch_profile, daemon=True).start()
 
     def set_coach_overlay(self, overlay):
         self._coach_overlay = overlay
