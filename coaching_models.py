@@ -5,10 +5,17 @@ from typing import Optional
 @dataclass(slots=True)
 class CoachingCue:
     text: str
+    display_text: str = ""
     subtitle: str = ""
     zone_label: str = ""
     voice_key: str = ""
+    sequence: list[str] = field(default_factory=list)
     state: str = "neutral"
+    gear: Optional[int] = None
+    brake: str = ""
+    throttle: str = ""
+    timing: str = ""
+    upcoming: str = ""
 
 
 @dataclass(slots=True)
@@ -45,6 +52,7 @@ class CoachingProfile:
     car_name: str = ""
     track_length_m: Optional[float] = None
     zones: list[CoachingZone] = field(default_factory=list)
+    startup_sequence: list[str] = field(default_factory=list)
     version: int = 1
 
 
@@ -61,6 +69,7 @@ class LiveZoneObservation:
     throttle_reapply_dist: Optional[float] = None
     entry_gear: Optional[int] = None
     samples: int = 0
+    last_brake_pct: float = 0.0
 
 
 @dataclass(slots=True)

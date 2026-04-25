@@ -1,6 +1,6 @@
-; iRacing Enduro Monitor — Inno Setup Script
+; iRacing Enduro Monitor - Inno Setup Script
 ; Download Inno Setup: https://jrsoftware.org/isinfo.php
-; Compile: open this file in Inno Setup Compiler → Build
+; Compile: open this file in Inno Setup Compiler and click Build
 
 [Setup]
 AppName=iRacing Enduro Monitor
@@ -20,7 +20,7 @@ PrivilegesRequired=none
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; Assumes you've run PyInstaller first → dist\iRacingEnduro.exe exists
+; Assumes you've run PyInstaller first so dist\iRacingEnduro.exe exists
 Source: "dist\iRacingEnduro.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -32,7 +32,7 @@ Name: "{commondesktop}\iRacing Enduro Monitor"; Filename: "{app}\iRacingEnduro.e
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Registry]
-; Auto-start on Windows login (current user only — no admin required)
+; Auto-start on Windows login (current user only - no admin required)
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; ValueName: "iRacingEnduro"; \
   ValueData: """{app}\iRacingEnduro.exe"""; \

@@ -407,6 +407,25 @@ def get_reference_lap_candidates(
         return None
 
 
+def get_all_laps() -> dict | None:
+    """Return all uploaded/live laps for the current user."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+
+    try:
+        response = requests.get(
+            f"{SERVER_URL}/api/telemetry/all-laps",
+            headers=_headers(),
+            timeout=COACHING_API_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 200:
+            return response.json()
+        print(f"[API] get_all_laps HTTP {response.status_code}")
+        return None
+    except Exception as e:
+        print(f"[API] get_all_laps failed: {e}")
+        return None
+
+
 def activate_reference_lap(lap_id: int) -> bool:
     """Set a lap as the active coaching reference for its track/car."""
     from config import COACHING_API_TIMEOUT_SECONDS
@@ -422,3 +441,31 @@ def activate_reference_lap(lap_id: int) -> bool:
     except Exception as e:
         print(f"[API] activate_reference_lap({lap_id}) failed: {e}")
         return False
+
+
+def upload_telemetry_file(file_path: str, session_type: str = "practice") -> dict | None:
+    """Upload an iRacing telemetry file so its laps can be used for coaching."""
+    from config import COACHING_API_TIMEOUT_SECONDS
+
+    headers = _headers()
+    headers.pop("Content-Type", None)
+
+    try:
+        with open(file_path, "rb") as file_obj:
+            response = requests.post(
+                f"{SERVER_URL}/api/telemetry/upload",
+                headers=headers,
+                data={"session_type": session_type},
+                files={"telemetry": (os.path.basename(file_path), file_obj)},
+                timeout=max(60, COACHING_API_TIMEOUT_SECONDS),
+            )
+        if response.ok:
+            return response.json()
+        print(
+            f"[API] upload_telemetry_file HTTP {response.status_code}: "
+            f"{response.text[:300]}"
+        )
+        return None
+    except Exception as e:
+        print(f"[API] upload_telemetry_file failed: {e}")
+        return None

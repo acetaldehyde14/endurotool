@@ -1,0 +1,32 @@
+# Python cache and local tooling
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build outputs
+build/
+dist/
+*.spec.tmp
+
+# Installer output
+Output/
+
+# Local/archive snapshots
+*.zip
+zip2_extracted/
+
+# Runtime config and telemetry spool
+iRacingEnduro/
+spool/
+
+# Local environment
+.env
+.env.*

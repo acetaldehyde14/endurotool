@@ -49,6 +49,7 @@ class AppWindow:
         self._audio_player = None
         self._on_test_overlay = None
         self._on_test_voice = None
+        self._on_test_correction = None
         self._track_id: str | None = None
         self._car_id: str | None = None
         self.root = None
@@ -212,6 +213,16 @@ class AppWindow:
             cursor="hand2",
             command=self._run_voice_test,
         ).pack(side="left", padx=4)
+        tk.Button(
+            coach_frame,
+            text="Test Correction",
+            font=("Segoe UI", 8),
+            bg="#333355",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            command=self._run_correction_test,
+        ).pack(side="left", padx=4)
 
         btn_frame = tk.Frame(self.root, bg="#1a1a2e", padx=24, pady=8)
         btn_frame.pack(fill="x")
@@ -348,9 +359,30 @@ class AppWindow:
         except Exception:
             pass
 
-    def _on_reference_activated(self):
+    def _on_reference_activated(self, lap=None):
         if self._coach:
             threading.Thread(target=self._coach.reload_profile, daemon=True).start()
+        if self._coach_overlay and lap:
+            try:
+                from coaching_models import CoachingCue
+                from gui.reference_lap_selector import _fmt_time
+
+                lap_time = _fmt_time(lap.get("lap_time_s"))
+                track = lap.get("track_name") or lap.get("track") or "Unknown track"
+                car = lap.get("car_name") or lap.get("car") or "Unknown car"
+                self._coach_overlay.show_cue(
+                    CoachingCue(
+                        text="Reference lap selected",
+                        subtitle=f"{lap_time} | {track}",
+                        zone_label=car,
+                        state="neutral",
+                        timing="Loaded",
+                        upcoming="First lap guidance active",
+                    ),
+                    duration_ms=4500,
+                )
+            except Exception as exc:
+                print(f"[UI] Reference overlay confirmation failed: {exc}")
 
     def set_coach_overlay(self, overlay):
         self._coach_overlay = overlay
@@ -358,9 +390,15 @@ class AppWindow:
     def set_audio_player(self, audio_player):
         self._audio_player = audio_player
 
-    def set_test_actions(self, on_test_overlay=None, on_test_voice=None):
+    def set_test_actions(
+        self,
+        on_test_overlay=None,
+        on_test_voice=None,
+        on_test_correction=None,
+    ):
         self._on_test_overlay = on_test_overlay
         self._on_test_voice = on_test_voice
+        self._on_test_correction = on_test_correction
 
     def _toggle_coaching(self):
         if not self._coach:
@@ -401,6 +439,12 @@ class AppWindow:
             self._on_test_voice()
         else:
             self.update_coaching_status("Voice test unavailable")
+
+    def _run_correction_test(self):
+        if self._on_test_correction:
+            self._on_test_correction()
+        else:
+            self.update_coaching_status("Correction test unavailable")
 
     def _poll_status(self):
         def fetch():

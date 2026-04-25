@@ -41,6 +41,7 @@ class AudioPlayer:
         self._enabled = COACHING_VOICE_ENABLED
         self._cache_dir = COACHING_AUDIO_CACHE_DIR
         self._manifest_loaded = False
+        self._sequence_lock = threading.Lock()
 
     # Public API
     def set_enabled(self, enabled: bool):
@@ -62,19 +63,20 @@ class AudioPlayer:
                 return "Voice manifest loaded but no assets are available"
             return f"Voice manifest loaded with {len(self._manifest)} asset(s)"
 
-    def play(self, voice_key: str):
+    def play(self, voice_key: str, force: bool = False):
         """Play the WAV for voice_key if available and not in cooldown."""
         if not self._enabled or not voice_key:
             return
 
         now = time.time()
-        if now - self._last_play < COACHING_MIN_SECONDS_BETWEEN_VOICE:
+        if not force and now - self._last_play < COACHING_MIN_SECONDS_BETWEEN_VOICE:
             return
 
         with self._lock:
             asset = self._resolve_asset_locked(voice_key)
 
         if asset is None:
+            print(f"[Audio] Missing voice asset: {voice_key}")
             return
 
         if not asset.cached:
@@ -96,6 +98,21 @@ class AudioPlayer:
             daemon=True,
         ).start()
 
+    def play_sequence(self, sequence: list[str], force: bool = False):
+        """Play voice keys in order. Missing clips are logged and skipped."""
+        if not self._enabled or not sequence:
+            return
+
+        now = time.time()
+        if not force and now - self._last_play < COACHING_MIN_SECONDS_BETWEEN_VOICE:
+            return
+
+        threading.Thread(
+            target=self._play_sequence_worker,
+            args=(list(sequence), now),
+            daemon=True,
+        ).start()
+
     # Internal
     def _play_wav(self, path: str):
         try:
@@ -106,6 +123,36 @@ class AudioPlayer:
             print("[Audio] winsound not available (non-Windows?)")
         except Exception as e:
             print(f"[Audio] Playback error: {e}")
+
+    def _play_wav_sync(self, path: str):
+        try:
+            import winsound
+
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_SYNC)
+        except ImportError:
+            print("[Audio] winsound not available (non-Windows?)")
+        except Exception as e:
+            print(f"[Audio] Playback error: {e}")
+
+    def _play_sequence_worker(self, sequence: list[str], started_at: float):
+        with self._sequence_lock:
+            self._last_play = started_at
+            for voice_key in sequence:
+                with self._lock:
+                    asset = self._resolve_asset_locked(voice_key)
+
+                if asset is None:
+                    print(f"[Audio] Missing voice asset: {voice_key}")
+                    continue
+
+                if not asset.cached:
+                    self._download_asset(asset)
+
+                if not asset.cached or not os.path.isfile(asset.local_path):
+                    print(f"[Audio] Voice asset unavailable: {voice_key}")
+                    continue
+
+                self._play_wav_sync(asset.local_path)
 
     def _fetch_manifest(self):
         try:

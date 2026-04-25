@@ -40,6 +40,7 @@ _SEGMENT_DEFAULTS: dict[str, tuple[str, str, str]] = {
 }
 _CORRECTION_HISTORY_LAPS = 3
 _MIN_ZONE_SAMPLES = 3
+_CORRECTION_CONTEXT = "there"
 
 
 class CoachManager:
@@ -65,7 +66,9 @@ class CoachManager:
         self._lap_cues_fired: set[str] = set()
         self._pending_corrections: dict[str, str] = {}
         self._active_obs: dict[str, LiveZoneObservation] = {}
+        self._active_zones: dict[str, CoachingZone] = {}
         self._zone_history: dict[str, list[LiveZoneObservation]] = {}
+        self._startup_fired = False
 
         self._last_text_time = 0.0
         self._status = "disabled"
@@ -99,6 +102,7 @@ class CoachManager:
             self._valid_laps_done = 0
             self._zone_history = {}
             self._pending_corrections = {}
+            self._startup_fired = False
             self.reload_profile()
             self._schedule_refresh()
         except Exception as exc:
@@ -119,8 +123,6 @@ class CoachManager:
 
     def on_live_sample(self, sample: dict) -> None:
         try:
-            if not self._enabled:
-                return
             with self._profile_lock:
                 profile = self._profile
             if profile is None:
@@ -130,8 +132,12 @@ class CoachManager:
             lap_dist = float(sample.get("lap_dist_pct", 0.0) or 0.0)
             speed_kph = float(sample.get("speed_kph", 0.0) or 0.0)
 
+            self._maybe_fire_startup(sample, profile)
+            if not self._enabled:
+                return
+
             lookahead = _calc_lookahead(speed_kph, profile.track_length_m)
-            self._check_for_cues(lap_dist, lookahead, profile)
+            self._check_for_cues(lap_dist, lookahead, profile, sample)
             self._update_observations(lap_dist, sample, profile)
         except Exception as exc:
             print(f"[Coach] on_live_sample error: {exc}")
@@ -198,13 +204,13 @@ class CoachManager:
         lap_dist: float,
         lookahead: float,
         profile: CoachingProfile,
+        sample: dict,
     ) -> None:
         if COACHING_MAX_ACTIVE_MESSAGES <= 0:
             return
 
         now = time.time()
-        if now - self._last_text_time < COACHING_MIN_SECONDS_BETWEEN_TEXT:
-            return
+        cooldown_active = now - self._last_text_time < COACHING_MIN_SECONDS_BETWEEN_TEXT
 
         ahead_end = lap_dist + lookahead
         sorted_zones = sorted(profile.zones, key=lambda zone: zone.priority, reverse=True)
@@ -213,26 +219,63 @@ class CoachManager:
             if not zone.enabled or zone.zone_id in self._lap_cues_fired:
                 continue
             if lap_dist <= zone.lap_dist_callout <= ahead_end:
-                cue = self._build_cue(zone)
+                cue = self._build_cue(zone, profile, sample, lap_dist)
                 if cue and cue.text:
+                    if cooldown_active and cue.state not in {"urgent_brake", "startup", "info"}:
+                        continue
                     self._fire_cue(cue)
                     self._lap_cues_fired.add(zone.zone_id)
                     break
 
-    def _build_cue(self, zone: CoachingZone) -> Optional[CoachingCue]:
+    def _build_cue(
+        self,
+        zone: CoachingZone,
+        profile: CoachingProfile,
+        sample: dict,
+        lap_dist: float,
+    ) -> Optional[CoachingCue]:
+        upcoming = _next_zone_label(profile.zones, zone, lap_dist)
         if (
             self._valid_laps_done >= COACHING_CORRECTION_START_LAP
             and zone.zone_id in self._pending_corrections
         ):
-            return _make_correction_cue(zone, self._pending_corrections[zone.zone_id])
-        return _make_generic_cue(zone)
+            return _make_correction_cue(
+                zone,
+                self._pending_corrections[zone.zone_id],
+                sample,
+                upcoming,
+            )
+        return _make_generic_cue(zone, sample, upcoming)
 
     def _fire_cue(self, cue: CoachingCue) -> None:
-        self._last_text_time = time.time()
+        if cue.state not in {"urgent_brake", "startup", "info"}:
+            self._last_text_time = time.time()
         try:
             self.on_cue(cue)
         except Exception as exc:
             print(f"[Coach] on_cue callback error: {exc}")
+
+    def _maybe_fire_startup(self, sample: dict, profile: CoachingProfile) -> None:
+        if self._startup_fired or profile is None:
+            return
+        if _is_in_pit_lane(sample):
+            return
+
+        self._enabled = True
+        sequence = profile.startup_sequence or ["coaching_active"]
+        self._startup_fired = True
+        self._set_status("Coaching active for this track")
+        self._fire_cue(
+            CoachingCue(
+                text="Coaching active for this track",
+                display_text="Coaching active for this track",
+                subtitle=profile.track_name,
+                zone_label=profile.car_name,
+                sequence=sequence,
+                voice_key=sequence[0] if sequence else "coaching_active",
+                state="info",
+            )
+        )
 
     def _update_observations(
         self,
@@ -240,6 +283,8 @@ class CoachManager:
         sample: dict,
         profile: CoachingProfile,
     ) -> None:
+        inside_zone_ids: set[str] = set()
+
         for zone in profile.zones:
             if not zone.enabled:
                 continue
@@ -247,6 +292,7 @@ class CoachManager:
             in_zone = zone.lap_dist_start <= lap_dist <= zone.lap_dist_end
             if not in_zone:
                 continue
+            inside_zone_ids.add(zone.zone_id)
 
             observation = self._active_obs.get(zone.zone_id)
             if observation is None:
@@ -257,6 +303,7 @@ class CoachManager:
                     entry_gear=sample.get("gear"),
                 )
                 self._active_obs[zone.zone_id] = observation
+                self._active_zones[zone.zone_id] = zone
 
             observation.samples += 1
             speed = sample.get("speed_kph")
@@ -275,6 +322,14 @@ class CoachManager:
                 observation.brake_start_dist = lap_dist
 
             if (
+                observation.brake_release_dist is None
+                and observation.brake_start_dist is not None
+                and observation.last_brake_pct > 0.1
+                and brake <= 0.05
+            ):
+                observation.brake_release_dist = lap_dist
+
+            if (
                 observation.throttle_reapply_dist is None
                 and throttle > 0.1
                 and observation.brake_start_dist is not None
@@ -282,6 +337,15 @@ class CoachManager:
                 observation.throttle_reapply_dist = lap_dist
 
             observation.exit_speed_kph = speed
+            observation.last_brake_pct = brake
+
+        for zone_id in list(self._active_obs):
+            if zone_id in inside_zone_ids:
+                continue
+            observation = self._active_obs.pop(zone_id)
+            zone = self._active_zones.pop(zone_id, None)
+            if zone is not None:
+                self._finalize_zone_exit(zone, observation, profile)
 
     def _finalize_lap_observations(self, valid: bool) -> None:
         if not valid:
@@ -397,6 +461,23 @@ class CoachManager:
     def _reset_lap_state(self) -> None:
         self._lap_cues_fired.clear()
         self._active_obs = {}
+        self._active_zones = {}
+
+    def _finalize_zone_exit(
+        self,
+        zone: CoachingZone,
+        observation: LiveZoneObservation,
+        profile: CoachingProfile,
+    ) -> None:
+        if observation.samples >= _MIN_ZONE_SAMPLES:
+            history = self._zone_history.setdefault(zone.zone_id, [])
+            history.append(observation)
+            if len(history) > 5:
+                del history[:-5]
+
+        cue = _make_immediate_correction_cue(zone, observation, profile.track_length_m)
+        if cue:
+            self._fire_cue(cue)
 
     def _set_status(self, status: str) -> None:
         self._status = status
@@ -418,28 +499,82 @@ def _calc_lookahead(speed_kph: float, track_length_m: Optional[float]) -> float:
     return max(COACHING_LOOKAHEAD_MIN_LAP_DIST, min(COACHING_LOOKAHEAD_MAX_LAP_DIST, dist_pct))
 
 
-def _make_generic_cue(zone: CoachingZone) -> Optional[CoachingCue]:
+def _make_generic_cue(
+    zone: CoachingZone,
+    sample: dict | None = None,
+    upcoming: str = "",
+) -> Optional[CoachingCue]:
     display_text = zone.generic_display_text
     voice_key = zone.generic_voice_key
     state = "neutral"
 
     if not display_text:
         defaults = _SEGMENT_DEFAULTS.get(zone.segment_type)
-        if defaults is None:
-            return None
-        display_text, state, default_voice = defaults
-        if not voice_key:
-            voice_key = default_voice
+        if defaults is not None:
+            display_text, state, default_voice = defaults
+            if not voice_key:
+                voice_key = default_voice
+        else:
+            display_text, state = _infer_first_lap_cue(zone)
 
     return CoachingCue(
         text=display_text,
+        display_text=display_text,
+        subtitle=_zone_subtitle(zone),
         zone_label=zone.name,
         voice_key=voice_key,
+        sequence=_generic_sequence(zone),
         state=state,
+        gear=zone.target_gear,
+        brake=_brake_instruction(zone, sample),
+        throttle=_throttle_instruction(zone, sample),
+        timing=_timing_instruction(zone),
+        upcoming=upcoming,
     )
 
 
-def _make_correction_cue(zone: CoachingZone, correction: str) -> CoachingCue:
+def _infer_first_lap_cue(zone: CoachingZone) -> tuple[str, str]:
+    if zone.target_brake_peak_pct is not None or zone.target_brake_initial_pct is not None:
+        return "Brake here", "urgent_brake"
+    if zone.target_throttle_min_pct is not None and zone.target_throttle_min_pct < 0.75:
+        return "Lift here", "caution_lift"
+    if zone.target_throttle_reapply_pct is not None:
+        return "Throttle on exit", "throttle_go"
+    if zone.target_gear is not None:
+        return f"Use gear {zone.target_gear}", "neutral"
+    if zone.target_speed_min_kph is not None:
+        return "Hit the apex speed", "neutral"
+    return "Reference marker", "neutral"
+
+
+def _generic_sequence(zone: CoachingZone) -> list[str]:
+    if zone.segment_type == "brake_zone":
+        return ["reference_brake_now_at_the_marker", "here"]
+    if zone.segment_type == "light_brake":
+        return ["reference_light_brake_here", "here"]
+    if zone.segment_type == "lift_zone":
+        return ["reference_small_lift_before_turn_in", "nextcorner"]
+    if zone.segment_type == "throttle_pickup":
+        return ["reference_back_to_throttle_on_exit", "here"]
+    if zone.segment_type == "wait_rotate":
+        return ["reference_wait_before_throttle_pickup", "thiscorner"]
+    if zone.segment_type == "exit":
+        return ["reference_begin_to_feed_in_throttle", "here"]
+    if zone.target_brake_peak_pct is not None or zone.target_brake_initial_pct is not None:
+        return ["reference_brake_now_at_the_marker", "here"]
+    if zone.target_throttle_reapply_pct is not None:
+        return ["reference_back_to_throttle_on_exit", "here"]
+    if zone.target_throttle_min_pct is not None and zone.target_throttle_min_pct < 0.75:
+        return ["reference_small_lift_before_turn_in", "nextcorner"]
+    return []
+
+
+def _make_correction_cue(
+    zone: CoachingZone,
+    correction: str,
+    sample: dict | None = None,
+    upcoming: str = "",
+) -> CoachingCue:
     lowered = correction.lower()
     if "brake" in lowered and ("earlier" in lowered or "more" in lowered):
         state = "urgent_brake"
@@ -447,7 +582,223 @@ def _make_correction_cue(zone: CoachingZone, correction: str) -> CoachingCue:
         state = "throttle_go"
     else:
         state = "caution_lift"
-    return CoachingCue(text=correction, zone_label=zone.name, state=state)
+    return CoachingCue(
+        text=correction,
+        display_text=correction,
+        subtitle=_zone_subtitle(zone),
+        zone_label=zone.name,
+        state=state,
+        gear=zone.target_gear,
+        brake=_brake_instruction(zone, sample),
+        throttle=_throttle_instruction(zone, sample),
+        timing=_timing_instruction(zone),
+        upcoming=upcoming,
+    )
+
+
+def _zone_subtitle(zone: CoachingZone) -> str:
+    parts: list[str] = []
+    if zone.target_speed_min_kph is not None:
+        parts.append(f"min {round(zone.target_speed_min_kph)} kph")
+    if zone.target_speed_exit_kph is not None:
+        parts.append(f"exit {round(zone.target_speed_exit_kph)} kph")
+    return " | ".join(parts)
+
+
+def _brake_instruction(zone: CoachingZone, sample: dict | None) -> str:
+    target = zone.target_brake_peak_pct
+    if target is None:
+        if zone.segment_type in {"brake_zone", "light_brake"}:
+            return "Brake reference"
+        if zone.segment_type in {"lift_zone", "wait_rotate"}:
+            return "No heavy brake"
+        return ""
+
+    target_pct = round(target * 100)
+    if not sample:
+        return f"Brake {target_pct}%"
+
+    current = float(sample.get("brake", 0.0) or 0.0)
+    delta = target - current
+    if abs(delta) < 0.08:
+        return f"Brake {target_pct}%"
+    if delta > 0:
+        return f"Brake +{round(delta * 100)}%"
+    return f"Brake -{round(abs(delta) * 100)}%"
+
+
+def _throttle_instruction(zone: CoachingZone, sample: dict | None) -> str:
+    target_min = zone.target_throttle_min_pct
+    target_reapply = zone.target_throttle_reapply_pct
+
+    if target_reapply is not None:
+        return "Throttle earlier" if zone.segment_type == "throttle_pickup" else "Throttle reference"
+
+    if target_min is not None:
+        target_pct = round(target_min * 100)
+        if not sample:
+            return f"Throttle {target_pct}%"
+        current = float(sample.get("throttle", 0.0) or 0.0)
+        delta = target_min - current
+        if abs(delta) < 0.08:
+            return f"Throttle {target_pct}%"
+        if delta > 0:
+            return f"Throttle +{round(delta * 100)}%"
+        return f"Lift {round(abs(delta) * 100)}%"
+
+    if zone.segment_type == "lift_zone":
+        return "Lift less"
+    if zone.segment_type == "wait_rotate":
+        return "Wait, then power"
+    if zone.segment_type in {"throttle_pickup", "exit"}:
+        return "Throttle earlier"
+    return ""
+
+
+def _timing_instruction(zone: CoachingZone) -> str:
+    if zone.segment_type in {"brake_zone", "light_brake"}:
+        return "Brake here"
+    if zone.segment_type == "lift_zone":
+        return "Lift here"
+    if zone.segment_type == "apex":
+        return "Apex"
+    if zone.segment_type in {"throttle_pickup", "exit"}:
+        return "Power now"
+    return ""
+
+
+def _next_zone_label(
+    zones: list[CoachingZone],
+    current: CoachingZone,
+    lap_dist: float,
+) -> str:
+    enabled = [zone for zone in zones if zone.enabled]
+    if not enabled:
+        return ""
+
+    upcoming = [
+        zone
+        for zone in enabled
+        if zone.zone_id != current.zone_id and zone.lap_dist_callout > lap_dist
+    ]
+    if not upcoming:
+        upcoming = [zone for zone in enabled if zone.zone_id != current.zone_id]
+    if not upcoming:
+        return ""
+
+    next_zone = min(upcoming, key=lambda zone: zone.lap_dist_callout)
+    label = next_zone.name or _segment_label(next_zone.segment_type)
+    action = _segment_label(next_zone.segment_type)
+    if label == action:
+        return f"Next: {label}"
+    return f"Next: {label} - {action}"
+
+
+def _segment_label(segment_type: str) -> str:
+    labels = {
+        "brake_zone": "brake",
+        "light_brake": "light brake",
+        "lift_zone": "lift",
+        "throttle_pickup": "throttle",
+        "wait_rotate": "wait",
+        "apex": "apex",
+        "exit": "exit",
+    }
+    return labels.get(segment_type, segment_type.replace("_", " "))
+
+
+def _make_immediate_correction_cue(
+    zone: CoachingZone,
+    observation: LiveZoneObservation,
+    track_length_m: Optional[float],
+) -> Optional[CoachingCue]:
+    tolerance = COACHING_ZONE_MATCH_TOLERANCE_LAP_DIST
+
+    if zone.lap_dist_callout is not None and observation.brake_start_dist is not None:
+        delta = observation.brake_start_dist - zone.lap_dist_callout
+        if abs(delta) > tolerance:
+            metres = _delta_metres(delta, track_length_m)
+            if delta > 0:
+                display = f"Brake {metres}m earlier {_CORRECTION_CONTEXT}"
+                sequence = [f"correction_brake_{metres}m_earlier", _CORRECTION_CONTEXT]
+            else:
+                display = f"Brake {metres}m later {_CORRECTION_CONTEXT}"
+                sequence = [f"correction_brake_{metres}m_later", _CORRECTION_CONTEXT]
+            return _correction_cue(zone, display, sequence)
+
+    if zone.target_brake_peak_pct is not None and observation.brake_peak_pct is not None:
+        delta_pct = round((zone.target_brake_peak_pct - observation.brake_peak_pct) * 100)
+        if abs(delta_pct) >= 10:
+            if delta_pct > 0:
+                display = f"Use {abs(delta_pct)}% more peak brake {_CORRECTION_CONTEXT}"
+                sequence = [
+                    f"correction_add_about_{abs(delta_pct)}_percent_more_brake_here",
+                    _CORRECTION_CONTEXT,
+                ]
+            else:
+                display = f"Use {abs(delta_pct)}% less peak brake {_CORRECTION_CONTEXT}"
+                sequence = [
+                    f"correction_reduce_about_{abs(delta_pct)}_percent_brake_here",
+                    _CORRECTION_CONTEXT,
+                ]
+            return _correction_cue(zone, display, sequence)
+
+    if (
+        zone.target_throttle_reapply_pct is not None
+        and observation.throttle_reapply_dist is not None
+    ):
+        delta = observation.throttle_reapply_dist - zone.target_throttle_reapply_pct
+        if abs(delta) > tolerance:
+            if delta < 0:
+                display = f"Wait longer before throttle {_CORRECTION_CONTEXT}"
+                sequence = [
+                    "correction_wait_longer_before_throttle_pickup",
+                    _CORRECTION_CONTEXT,
+                ]
+            else:
+                display = f"Throttle earlier {_CORRECTION_CONTEXT}"
+                sequence = [
+                    "correction_back_to_throttle_earlier",
+                    _CORRECTION_CONTEXT,
+                ]
+            return _correction_cue(zone, display, sequence)
+
+    return None
+
+
+def _correction_cue(
+    zone: CoachingZone,
+    display: str,
+    sequence: list[str],
+) -> CoachingCue:
+    return CoachingCue(
+        text=display,
+        display_text=display,
+        subtitle=_zone_subtitle(zone),
+        zone_label=zone.name,
+        sequence=sequence,
+        voice_key=sequence[0] if sequence else "",
+        state="correction",
+        gear=zone.target_gear,
+        brake=_brake_instruction(zone, None),
+        throttle=_throttle_instruction(zone, None),
+        timing="Correction",
+    )
+
+
+def _delta_metres(delta: float, track_length_m: Optional[float]) -> int:
+    if track_length_m and track_length_m > 0:
+        metres = abs(delta) * track_length_m
+    else:
+        metres = abs(delta) * 1000
+    return max(5, int(round(metres / 5.0) * 5))
+
+
+def _is_in_pit_lane(sample: dict) -> bool:
+    for key in ("on_pit_road", "is_on_pit_road", "pit_road", "in_pits"):
+        if key in sample and sample.get(key) is not None:
+            return bool(sample.get(key))
+    return float(sample.get("speed_kph", 0.0) or 0.0) <= 30.0
 
 
 def _analyze_zone(
@@ -467,12 +818,12 @@ def _analyze_zone(
         delta = avg_start - zone.lap_dist_callout
         if delta > tolerance:
             if track_length_m:
-                return f"Brake around {round(abs(delta) * track_length_m)}m earlier"
-            return "Brake a little earlier here"
+                return f"Last laps: brake {round(abs(delta) * track_length_m)}m earlier"
+            return "Last laps: brake earlier here"
         if delta < -tolerance:
             if track_length_m:
-                return f"Brake about {round(abs(delta) * track_length_m)}m later"
-            return "You can brake a little later here"
+                return f"Last laps: brake {round(abs(delta) * track_length_m)}m later"
+            return "Last laps: brake later here"
 
     peaks = [
         observation.brake_peak_pct
@@ -483,9 +834,9 @@ def _analyze_zone(
         avg_peak = sum(peaks) / len(peaks)
         delta = zone.target_brake_peak_pct - avg_peak
         if delta > 0.08:
-            return f"Use about {round(delta * 100)}% more brake here"
+            return f"Last laps: brake {round(delta * 100)}% more here"
         if delta < -0.08:
-            return f"Ease off about {round(abs(delta) * 100)}% brake here"
+            return f"Last laps: brake {round(abs(delta) * 100)}% less here"
 
     mins = [
         observation.min_speed_kph
@@ -496,9 +847,9 @@ def _analyze_zone(
         avg_min = sum(mins) / len(mins)
         delta = zone.target_speed_min_kph - avg_min
         if delta > 3:
-            return f"Carry {round(delta)} kph more minimum speed"
+            return f"Last laps: carry {round(delta)} kph more min speed"
         if delta < -3:
-            return f"Slow down {round(abs(delta))} kph more before apex"
+            return f"Last laps: slow {round(abs(delta))} kph more before apex"
 
     throttles = [
         observation.throttle_reapply_dist
@@ -510,12 +861,12 @@ def _analyze_zone(
         delta = avg_reapply - zone.target_throttle_reapply_pct
         if delta < -tolerance:
             if track_length_m:
-                return f"Get back to throttle about {round(abs(delta) * track_length_m)}m later"
-            return "Wait a little longer before getting on throttle"
+                return f"Last laps: throttle {round(abs(delta) * track_length_m)}m later"
+            return "Last laps: wait longer before throttle"
         if delta > tolerance:
             if track_length_m:
-                return f"Get on throttle {round(abs(delta) * track_length_m)}m earlier"
-            return "Get on throttle a bit earlier"
+                return f"Last laps: throttle {round(abs(delta) * track_length_m)}m earlier"
+            return "Last laps: throttle earlier"
 
     return None
 
@@ -530,6 +881,16 @@ def _parse_profile(
     reference = data.get("reference")
     if not isinstance(reference, dict):
         reference = {}
+    startup_cue = data.get("startup_cue")
+    startup_sequence: list[str] = []
+    if isinstance(startup_cue, dict):
+        raw_sequence = startup_cue.get("sequence", [])
+        if isinstance(raw_sequence, list):
+            startup_sequence = [str(item) for item in raw_sequence if item]
+    if not startup_sequence and isinstance(reference.get("startup_cue"), dict):
+        raw_sequence = reference["startup_cue"].get("sequence", [])
+        if isinstance(raw_sequence, list):
+            startup_sequence = [str(item) for item in raw_sequence if item]
 
     zones_raw = data.get("zones", [])
     zones: list[CoachingZone] = []
@@ -575,6 +936,7 @@ def _parse_profile(
         car_name=str(reference.get("car_name") or fallback_car_name),
         track_length_m=_as_float(reference.get("track_length_m")),
         zones=zones,
+        startup_sequence=startup_sequence,
         version=int(reference.get("version", data.get("version", 1)) or 1),
     )
 

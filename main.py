@@ -106,7 +106,11 @@ def main():
                         print(f"[Main] Coach overlay error: {exc}")
                 if coach_manager and coach_manager._voice_enabled:
                     try:
-                        audio_player.play(cue.voice_key)
+                        force = cue.state in {"urgent_brake", "info", "startup"}
+                        if cue.sequence:
+                            audio_player.play_sequence(cue.sequence, force=force)
+                        elif cue.voice_key:
+                            audio_player.play_sequence([cue.voice_key], force=force)
                     except Exception as exc:
                         print(f"[Main] Audio player error: {exc}")
 
@@ -116,9 +120,16 @@ def main():
             def on_test_overlay():
                 cue = CoachingCue(
                     text="Brake here",
+                    display_text="Brake here",
                     subtitle="Overlay test",
                     zone_label="Coach",
                     state="urgent_brake",
+                    sequence=["reference_brake_now_at_the_marker", "here"],
+                    gear=3,
+                    brake="Brake +15%",
+                    throttle="Lift 20%",
+                    timing="Brake here",
+                    upcoming="Next: exit - throttle",
                 )
                 if coach_overlay:
                     try:
@@ -130,13 +141,13 @@ def main():
                 app_window.update_coaching_status("Overlay unavailable")
 
             def on_test_voice():
-                voice_key = "reference_brake_now_at_the_marker"
+                sequence = ["reference_brake_now_at_the_marker", "here"]
                 try:
-                    if audio_player.has_voice_key(voice_key):
+                    if any(audio_player.has_voice_key(key) for key in sequence):
                         was_enabled = coach_manager._voice_enabled if coach_manager else True
                         if not was_enabled:
                             audio_player.set_enabled(True)
-                        audio_player.play(voice_key)
+                        audio_player.play_sequence(sequence, force=True)
                         if not was_enabled:
                             audio_player.set_enabled(False)
                         app_window.update_coaching_status("Voice test requested")
@@ -145,6 +156,33 @@ def main():
                 except Exception as exc:
                     print(f"[Main] Voice test error: {exc}")
                     app_window.update_coaching_status("Voice test failed")
+
+            def on_test_correction():
+                cue = CoachingCue(
+                    text="Brake 10m later there",
+                    display_text="Brake 10m later there",
+                    subtitle="Correction test",
+                    zone_label="Coach",
+                    state="correction",
+                    sequence=["correction_brake_10m_later", "there"],
+                    timing="Correction",
+                )
+                if coach_overlay:
+                    try:
+                        coach_overlay.show_cue(cue)
+                    except Exception as exc:
+                        print(f"[Main] Coach correction test error: {exc}")
+                try:
+                    was_enabled = coach_manager._voice_enabled if coach_manager else True
+                    if not was_enabled:
+                        audio_player.set_enabled(True)
+                    audio_player.play_sequence(cue.sequence, force=True)
+                    if not was_enabled:
+                        audio_player.set_enabled(False)
+                    app_window.update_coaching_status("Correction test sent")
+                except Exception as exc:
+                    print(f"[Main] Correction voice test error: {exc}")
+                    app_window.update_coaching_status("Correction test failed")
 
             coach_manager.set_callbacks(
                 on_cue=on_coach_cue,
@@ -156,6 +194,7 @@ def main():
             app_window.set_test_actions(
                 on_test_overlay=on_test_overlay,
                 on_test_voice=on_test_voice,
+                on_test_correction=on_test_correction,
             )
             try:
                 audio_player.load_manifest()

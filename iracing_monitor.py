@@ -157,6 +157,7 @@ class IRacingMonitor:
                 "vel_y": round(float(self.ir["VelocityY"] or 0.0), 3),
                 "track_temp_c": round(float(self.ir["TrackTempCrew"] or 0.0), 2),
                 "air_temp_c": round(float(self.ir["AirTemp"] or 0.0), 2),
+                "on_pit_road": self._b("OnPitRoad"),
             }
 
             if lap_number != self._current_lap and lap_number > 0:
@@ -528,6 +529,13 @@ class IRacingMonitor:
         try:
             value = self.ir[key]
             return round(float(value), 4) if value is not None else None
+        except Exception:
+            return None
+
+    def _b(self, key) -> bool | None:
+        try:
+            value = self.ir[key]
+            return bool(value) if value is not None else None
         except Exception:
             return None
 

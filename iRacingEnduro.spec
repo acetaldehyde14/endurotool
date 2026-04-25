@@ -1,4 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
@@ -7,6 +9,13 @@ hiddenimports = []
 tmp_ret = collect_all('PIL')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+python_root = os.path.dirname(os.path.abspath(os.__file__))
+python_root = os.path.dirname(python_root)
+tcl_root = os.path.join(python_root, 'tcl')
+datas += [
+    (os.path.join(tcl_root, 'tcl8.6'), '_tcl_data'),
+    (os.path.join(tcl_root, 'tk8.6'), '_tk_data'),
+]
 
 a = Analysis(
     ['main.py'],
